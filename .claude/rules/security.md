@@ -3,8 +3,9 @@
 ## Strictly Forbidden
 
 - Reading or printing `.env`, `.env.*` files
-- Hardcoding API keys, push credentials, or any secret in code
-- Logging device push tokens, credentials, or full notification payloads
+- Hardcoding Solapi keys, Discord webhook URLs, Redis passwords, or any secret in code
+- Logging API keys, webhook URLs, verification codes, or unmasked phone numbers (use `maskPhone`)
+- Putting upstream error strings into thrown errors (they can echo URLs/keys) — wrap with a generic message
 - Reading files under a `secrets/` directory if one is ever introduced
 
 ## Environment Variable Management
