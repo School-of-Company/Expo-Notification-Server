@@ -73,17 +73,17 @@ expo-notification-server/
 ## Feature Development Flow
 
 1. `git status` — check current state
-2. Create branch off `main`: `git checkout -b feat/<scope> origin/main` (or use `new-branch`)
+2. Create branch off `develop`: `git checkout -b feat/<scope> origin/develop` (or use `new-branch`)
 3. Implement with `feature-agent`
 4. Verify with `pnpm test` and `pnpm test:e2e`
 5. Verify with `pnpm exec tsc -p tsconfig.build.json --noEmit`
 6. Review diff with `review-agent`
-7. Draft PR into `main` with `pr-agent`
+7. Draft PR into `develop` with `pr-agent`
 
 ## Bug Fix Flow
 
 1. Reproduce the bug
-2. `git checkout -b fix/<scope> origin/main`
+2. `git checkout -b fix/<scope> origin/develop`
 3. Apply minimal fix with `fix-agent`
 4. Add regression test
 5. Verify with `pnpm test`
@@ -99,13 +99,13 @@ expo-notification-server/
 
 ## Branching Model
 
-- `main` is the only long-lived branch. All `feat/`/`fix/`/`chore/`/`refactor/`/`test/`/`docs/`
-  branches fork from `origin/main` and PR back into `main`.
-- If a `develop` integration branch is introduced later, update `.claude/` (skills, agents) and this section together.
+- `develop` is the integration branch. All `feat/`/`fix/`/`chore/`/`refactor/`/`test/`/`docs/`
+  branches fork from `origin/develop` and PR back into `develop`.
+- `main` is the stable/release branch. It only moves via a separate, manual `develop` → `main` release PR.
 
 ## Git Rules
 
-- No direct commits to `main`
+- No direct commits to `main` or `develop`
 - Do not commit or push without explicit request
 - Always run `git status` before starting work
 - Branch naming: `feat/<scope>`, `fix/<scope>`, `chore/<scope>`
