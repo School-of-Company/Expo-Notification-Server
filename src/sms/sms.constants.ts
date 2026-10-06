@@ -1,0 +1,1 @@
+export const SOLAPI_CLIENT = 'SOLAPI_CLIENT';

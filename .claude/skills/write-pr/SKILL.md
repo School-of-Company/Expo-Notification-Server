@@ -1,14 +1,14 @@
 # Write PR
 
-PRs target `main` (the integration branch), not `main`. `main` only moves via a separate,
-manual `main` → `main` release PR — not something this skill drives.
+PRs target `develop` (the integration branch), not `main`. `main` only moves via a separate,
+manual `develop` → `main` release PR — not something this skill drives.
 
 ## Steps
 
-1. `git fetch origin main` — update local tracking branch.
-2. `git log origin/main..HEAD --oneline` — list commits.
-3. `git diff origin/main...HEAD --stat` — changed file stats.
-4. `git diff origin/main...HEAD` — full diff.
+1. `git fetch origin develop` — update local tracking branch.
+2. `git log origin/develop..HEAD --oneline` — list commits.
+3. `git diff origin/develop...HEAD --stat` — changed file stats.
+4. `git diff origin/develop...HEAD` — full diff.
 5. Propose 3 Korean PR title candidates and ask the user to pick one.
 6. Wait for the user to select a title.
 7. Write the PR body to `/tmp/pr_body.md`, filling in `.github/PULL_REQUEST_TEMPLATE.md`'s sections, in Korean.
@@ -68,7 +68,7 @@ Resolves: #{이슈번호}
 ## 🎸 기타
 BODY
 
-gh pr create --title "<선택한 제목>" --body-file /tmp/pr_body.md --base main --assignee @me
+gh pr create --title "<선택한 제목>" --body-file /tmp/pr_body.md --base develop --assignee @me
 ```
 
 ## Rules
@@ -77,5 +77,5 @@ gh pr create --title "<선택한 제목>" --body-file /tmp/pr_body.md --base mai
 - Only check items you have actually verified.
 - Always propose 3 Korean title candidates and wait for user selection before creating the PR.
 - Branch must be pushed before running `gh pr create`.
-- Always pass `--base main` explicitly — do not rely on the repo's default branch.
+- Always pass `--base develop` explicitly — do not rely on the repo's default branch.
 - Always use `--body-file` (never inline heredoc) to avoid hook parse errors.
