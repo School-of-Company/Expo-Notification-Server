@@ -1,0 +1,77 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git branch*)",
+      "Bash(git checkout*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git stash*)",
+      "Bash(ls*)",
+      "Bash(cat*)",
+      "Bash(grep*)",
+      "Bash(find*)",
+      "Bash(echo*)",
+      "Bash(head*)",
+      "Bash(tail*)",
+      "Bash(wc*)",
+      "Bash(pwd*)",
+      "Bash(mkdir*)",
+      "Bash(chmod*)",
+      "Bash(touch*)",
+      "Bash(pnpm test*)",
+      "Bash(pnpm lint*)",
+      "Bash(pnpm build*)",
+      "Bash(pnpm start*)",
+      "Bash(pnpm format*)",
+      "Bash(pnpm install*)",
+      "Bash(pnpm exec tsc*)",
+      "Bash(pnpm exec jest*)"
+    ],
+    "deny": [
+      "Bash(git push*--force*)",
+      "Bash(git push*-f *)",
+      "Bash(git push*-f)",
+      "Bash(git reset*--hard*)",
+      "Bash(git clean*-f*)",
+      "Bash(rm*-r*)",
+      "Bash(rm*--recursive*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/pre-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/stop.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
