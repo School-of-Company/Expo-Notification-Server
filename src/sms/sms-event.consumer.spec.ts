@@ -1,6 +1,7 @@
 import { EachMessageHandler } from 'kafkajs';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import { SmsEventConsumer } from './sms-event.consumer';
+import { SmsEventGuard } from './sms-event.guard';
 import { SmsEventService } from './sms-event.service';
 
 const drawResult = {
@@ -29,7 +30,8 @@ describe('SmsEventConsumer', () => {
   };
   let producer: { connect: jest.Mock; send: jest.Mock; disconnect: jest.Mock };
   let kafka: { consumer: jest.Mock; producer: jest.Mock };
-  let service: { handle: jest.Mock; recordFailure: jest.Mock };
+  let service: { handle: jest.Mock };
+  let guard: { recordFailure: jest.Mock };
   let eachMessage: EachMessageHandler;
   let consumer: SmsEventConsumer;
 
@@ -47,13 +49,12 @@ describe('SmsEventConsumer', () => {
       consumer: jest.fn().mockReturnValue(client),
       producer: jest.fn().mockReturnValue(producer),
     };
-    service = {
-      handle: jest.fn(),
-      recordFailure: jest.fn().mockResolvedValue(1),
-    };
+    service = { handle: jest.fn() };
+    guard = { recordFailure: jest.fn().mockResolvedValue(1) };
     consumer = new SmsEventConsumer(
       kafka as never,
       config,
+      guard as unknown as SmsEventGuard,
       service as unknown as SmsEventService,
     );
     await consumer.onModuleInit();
@@ -73,7 +74,7 @@ describe('SmsEventConsumer', () => {
     await eachMessage(toMessage(drawResult));
 
     expect(service.handle).toHaveBeenCalledWith(drawResult);
-    expect(service.recordFailure).not.toHaveBeenCalled();
+    expect(guard.recordFailure).not.toHaveBeenCalled();
   });
 
   it('스키마가 틀린 메시지는 던지지 않고 건너뛴다 (무한 재시도 방지)', async () => {
@@ -92,7 +93,7 @@ describe('SmsEventConsumer', () => {
 
   it('재시도 상한 전의 실패는 던져서 Kafka가 재전달하게 한다', async () => {
     service.handle.mockRejectedValue(new Error('gateway down'));
-    service.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts - 1);
+    guard.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts - 1);
 
     await expect(eachMessage(toMessage(drawResult))).rejects.toThrow(
       'gateway down',
@@ -102,17 +103,18 @@ describe('SmsEventConsumer', () => {
 
   it('재시도 상한에 도달하면 원본을 DLQ로 보내고 던지지 않는다', async () => {
     service.handle.mockRejectedValue(new Error('insufficient balance'));
-    service.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts);
+    guard.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts);
 
     await expect(eachMessage(toMessage(drawResult))).resolves.toBeUndefined();
 
-    expect(service.recordFailure).toHaveBeenCalledWith('e1');
+    expect(guard.recordFailure).toHaveBeenCalledWith('e1');
     expect(producer.send).toHaveBeenCalledWith({
       topic: 'notification.sms.requested.dlq',
       messages: [
         {
           key: Buffer.from('k'),
           value: Buffer.from(JSON.stringify(drawResult)),
+          headers: { 'x-source-topic': 'notification.sms.requested' },
         },
       ],
     });
@@ -120,7 +122,7 @@ describe('SmsEventConsumer', () => {
 
   it('DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다', async () => {
     service.handle.mockRejectedValue(new Error('insufficient balance'));
-    service.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts);
+    guard.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts);
     producer.send.mockRejectedValue(new Error('broker down'));
 
     await expect(eachMessage(toMessage(drawResult))).rejects.toThrow(

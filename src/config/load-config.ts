@@ -20,6 +20,26 @@ function pickDefined<T extends Record<string, unknown>>(
   ) as Partial<T>;
 }
 
+function eurekaFromEnv(env: Env): Record<string, unknown> {
+  if (!env.EUREKA_SERVICE_URL) {
+    return {};
+  }
+  return {
+    eureka: {
+      ...pickDefined({
+        serviceUrl: env.EUREKA_SERVICE_URL,
+        heartbeatIntervalSeconds: env.EUREKA_HEARTBEAT_INTERVAL_SECONDS,
+        leaseDurationSeconds: env.EUREKA_LEASE_DURATION_SECONDS,
+        requestTimeoutMs: env.EUREKA_REQUEST_TIMEOUT_MS,
+      }),
+      instance: pickDefined({
+        hostName: env.INSTANCE_HOSTNAME,
+        ipAddr: env.INSTANCE_IP_ADDR,
+      }),
+    },
+  };
+}
+
 function configFromEnv(env: Env): Record<string, unknown> {
   return {
     ...pickDefined({ port: env.PORT }),
@@ -31,6 +51,8 @@ function configFromEnv(env: Env): Record<string, unknown> {
       topics: pickDefined({
         smsRequested: env.KAFKA_SMS_REQUESTED_TOPIC,
         smsDeadLetter: env.KAFKA_SMS_DEAD_LETTER_TOPIC,
+        participantRegistered: env.KAFKA_PARTICIPANT_REGISTERED_TOPIC,
+        entryRecorded: env.KAFKA_ENTRY_RECORDED_TOPIC,
         expoApplicantCount: env.KAFKA_EXPO_APPLICANT_COUNT_TOPIC,
       }),
     }),
@@ -48,8 +70,21 @@ function configFromEnv(env: Env): Record<string, unknown> {
       authMaxSendCount: env.SMS_AUTH_MAX_SEND_COUNT,
       authMaxSendCountPerHour: env.SMS_AUTH_MAX_SEND_COUNT_PER_HOUR,
       eventMaxAttempts: env.SMS_EVENT_MAX_ATTEMPTS,
+      expoName: env.SMS_EXPO_NAME,
+      contactStandardNumber: env.SMS_CONTACT_STANDARD_NUMBER,
+      contactTraineeNumber: env.SMS_CONTACT_TRAINEE_NUMBER,
+      surveyUrlTemplate: env.SMS_SURVEY_URL_TEMPLATE,
       authMaxVerifyAttemptCount: env.SMS_AUTH_MAX_VERIFY_ATTEMPT_COUNT,
     }),
+    attention: pickDefined({
+      baseUrl: env.ATTENTION_SERVICE_URL,
+      internalToken: env.ATTENTION_SERVICE_INTERNAL_TOKEN,
+    }),
+    user: pickDefined({
+      baseUrl: env.USER_SERVICE_URL,
+      internalToken: env.USER_SERVICE_INTERNAL_TOKEN,
+    }),
+    ...eurekaFromEnv(env),
     discord: pickDefined({
       participantNumberUrl: env.DISCORD_PARTICIPANT_NUMBER_URL,
     }),

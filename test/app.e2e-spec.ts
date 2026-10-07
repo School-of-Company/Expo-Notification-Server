@@ -14,6 +14,14 @@ import { FakeRedis } from './fixtures/fake-redis';
 
 const config = createAppConfig();
 
+type FetchInput = Parameters<typeof fetch>[0];
+const urlOf = (input: FetchInput): string =>
+  typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+
 describe('Notification server (e2e)', () => {
   let app: INestApplication<App>;
   let solapiSend: jest.Mock;
@@ -39,9 +47,17 @@ describe('Notification server (e2e)', () => {
   beforeEach(async () => {
     handlers.clear();
     solapiSend = jest.fn().mockResolvedValue({ failedMessageList: [] });
-    fetchSpy = jest
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue({ ok: true, status: 204 } as Response);
+    fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      Promise.resolve(
+        urlOf(input).endsWith('/internal/qr-images')
+          ? ({
+              ok: true,
+              status: 201,
+              json: () => Promise.resolve({ url: 'https://s3.test/qr.jpg' }),
+            } as Response)
+          : ({ ok: true, status: 204 } as Response),
+      ),
+    );
 
     dlqSend = jest.fn();
     const fakeKafka = {
@@ -270,6 +286,95 @@ describe('Notification server (e2e)', () => {
       });
 
       expect(solapiSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('QR·설문 문자 (Kafka → Attention/User 내부 호출)', () => {
+    const registered = {
+      eventId: 'reg-1',
+      expoId: 'expo-1',
+      participationType: 'STANDARD',
+      id: 42,
+      phoneNumber: '010-1234-5678',
+    };
+    const registeredGroup = `${config.kafka.smsGroupId}.participant-registered`;
+    const entryGroup = `${config.kafka.smsGroupId}.entry-recorded`;
+    const callsTo = (suffix: string) =>
+      (fetchSpy.mock.calls as [FetchInput, RequestInit?][]).filter(([url]) =>
+        urlOf(url).endsWith(suffix),
+      );
+
+    it('등록 완료 이벤트: QR URL을 받아 문자를 보내고 sms-try를 호출한다', async () => {
+      await emit(registeredGroup, registered);
+
+      expect(callsTo('/internal/qr-images')).toHaveLength(1);
+      expect(sentBatches()[0][0][0]).toEqual({
+        to: '01012345678',
+        from: config.sms.fromStandardNumber,
+        text: expect.stringContaining('https://s3.test/qr.jpg') as string,
+      });
+      const [smsTry] = callsTo('/internal/participants/sms-try');
+      expect(JSON.parse((smsTry[1] as RequestInit).body as string)).toEqual({
+        expoId: 'expo-1',
+        participationType: 'STANDARD',
+        phoneNumber: '01012345678',
+      });
+    });
+
+    it('같은 이벤트 재전달은 QR 생성, 문자, sms-try를 다시 하지 않는다 (sms-try 중복 증가 방지)', async () => {
+      await emit(registeredGroup, registered);
+      await emit(registeredGroup, registered);
+
+      expect(callsTo('/internal/qr-images')).toHaveLength(1);
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+      expect(callsTo('/internal/participants/sms-try')).toHaveLength(1);
+    });
+
+    it('연수자 이벤트는 연수 발신번호로 보내고 sms-try는 호출하지 않는다', async () => {
+      await emit(registeredGroup, {
+        ...registered,
+        participationType: 'TRAINEE',
+      });
+
+      expect(sentBatches()[0][0][0].from).toBe(config.sms.fromTraineeNumber);
+      expect(callsTo('/internal/participants/sms-try')).toHaveLength(0);
+    });
+
+    it('Attention이 실패하면 문자를 보내지 않고 던진 뒤, 재전달되면 다시 시도한다', async () => {
+      fetchSpy.mockResolvedValueOnce({ ok: false, status: 503 });
+
+      await expect(emit(registeredGroup, registered)).rejects.toThrow();
+      expect(solapiSend).not.toHaveBeenCalled();
+
+      await emit(registeredGroup, registered);
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+    });
+
+    it('sms-try가 실패해도 던지지 않고 다시 호출하지도 않는다', async () => {
+      fetchSpy.mockImplementation((input: FetchInput) =>
+        Promise.resolve(
+          urlOf(input).endsWith('/internal/qr-images')
+            ? ({
+                ok: true,
+                status: 201,
+                json: () => Promise.resolve({ url: 'https://s3.test/qr.jpg' }),
+              } as Response)
+            : ({ ok: false, status: 500 } as Response),
+        ),
+      );
+
+      await expect(emit(registeredGroup, registered)).resolves.toBeUndefined();
+      await emit(registeredGroup, registered);
+
+      expect(callsTo('/internal/participants/sms-try')).toHaveLength(1);
+    });
+
+    it('입장 이벤트: 일반 참가자에게 설문 링크 문자를 보낸다', async () => {
+      await emit(entryGroup, { ...registered, eventId: 'entry-1' });
+
+      const { text, from } = sentBatches()[0][0][0];
+      expect(from).toBe(config.sms.fromStandardNumber);
+      expect(text).toContain('https://survey.test/expo/expo-1');
     });
   });
 

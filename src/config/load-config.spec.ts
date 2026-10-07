@@ -7,6 +7,10 @@ const baseEnv = {
   SMS_API_SECRET: 'env-secret',
   SMS_FROM_STANDARD_NUMBER: '0623804504',
   SMS_FROM_TRAINEE_NUMBER: '0623804587',
+  ATTENTION_SERVICE_URL: 'http://attention:8080',
+  ATTENTION_SERVICE_INTERNAL_TOKEN: 'a'.repeat(32),
+  USER_SERVICE_URL: 'http://user:8080',
+  USER_SERVICE_INTERNAL_TOKEN: 'u'.repeat(32),
 };
 
 const jsonResponse = (body: unknown, status = 200) => ({
@@ -35,6 +39,60 @@ describe('loadConfig', () => {
 
     expect(config.redis.password).toBeUndefined();
     expect(config.discord.participantNumberUrl).toBeUndefined();
+  });
+
+  it('EUREKA_SERVICE_URL이 없으면 Eureka 등록 설정이 없다 (로컬 개발)', async () => {
+    const config = await loadConfig(baseEnv, jest.fn());
+
+    expect(config.eureka).toBeUndefined();
+  });
+
+  it('EUREKA_SERVICE_URL과 INSTANCE_* 를 eureka 설정으로 읽는다', async () => {
+    const config = await loadConfig(
+      {
+        ...baseEnv,
+        EUREKA_SERVICE_URL: 'http://eureka:8761/eureka',
+        INSTANCE_HOSTNAME: 'notification-1',
+        INSTANCE_IP_ADDR: '10.0.0.7',
+        EUREKA_HEARTBEAT_INTERVAL_SECONDS: '15',
+      },
+      jest.fn(),
+    );
+
+    expect(config.eureka).toEqual({
+      serviceUrl: 'http://eureka:8761/eureka',
+      heartbeatIntervalSeconds: 15,
+      instance: { hostName: 'notification-1', ipAddr: '10.0.0.7' },
+    });
+  });
+
+  it('내부 호출 토큰이 32자 미만이면 부팅을 실패시킨다 (토큰 값은 노출하지 않는다)', async () => {
+    const promise = loadConfig(
+      { ...baseEnv, USER_SERVICE_INTERNAL_TOKEN: 'short-secret' },
+      jest.fn(),
+    );
+
+    await expect(promise).rejects.toThrow(/user\.internalToken/);
+    await expect(promise).rejects.not.toThrow(/short-secret/);
+  });
+
+  it('SMS 관련 선택 설정(행사명, 문의 번호, 설문 URL 템플릿)을 읽는다', async () => {
+    const config = await loadConfig(
+      {
+        ...baseEnv,
+        SMS_EXPO_NAME: '광주 박람회',
+        SMS_CONTACT_STANDARD_NUMBER: '062-380-4504',
+        SMS_SURVEY_URL_TEMPLATE: 'https://survey.example/{expoId}',
+      },
+      jest.fn(),
+    );
+
+    expect(config.sms.expoName).toBe('광주 박람회');
+    expect(config.sms.contactStandardNumber).toBe('062-380-4504');
+    expect(config.sms.surveyUrlTemplate).toBe(
+      'https://survey.example/{expoId}',
+    );
+    expect(config.sms.contactTraineeNumber).toBeUndefined();
   });
 
   it('config 서버 값이 env 값보다 우선하고 형제 키는 유지된다', async () => {
