@@ -45,7 +45,10 @@ const event = {
   id: 42,
   phoneNumber: '010-1234-5678',
 };
-const guard = { recordFailure: jest.fn().mockResolvedValue(1) };
+const guard = {
+  recordFailure: jest.fn().mockResolvedValue(1),
+  clearFailures: jest.fn(),
+};
 
 describe('ParticipantRegisteredConsumer', () => {
   it('User 등록 완료 토픽을 전용 그룹으로 구독하고, 정규화한 이벤트를 QR 문자 서비스로 넘긴다', async () => {
@@ -124,6 +127,7 @@ describe('EntryRecordedConsumer', () => {
     };
     const exhausted = {
       recordFailure: jest.fn().mockResolvedValue(config.sms.eventMaxAttempts),
+      clearFailures: jest.fn(),
     };
     await new EntryRecordedConsumer(
       kafka as never,

@@ -93,16 +93,20 @@ describe('SmsAuthStore', () => {
 });
 
 describe('SmsEventDedupeStore', () => {
-  const redis = { set: jest.fn(), del: jest.fn() };
+  const redis = {
+    set: jest.fn(),
+    get: jest.fn(),
+    exists: jest.fn(),
+    del: jest.fn(),
+  };
   const store = new SmsEventDedupeStore(redis as unknown as Redis);
 
   beforeEach(() => jest.resetAllMocks());
 
-  it('claim은 5분짜리 processing 리스를 SET NX로 선점한다', async () => {
-    redis.set.mockResolvedValueOnce('OK').mockResolvedValueOnce(null);
+  it('claim은 5분짜리 processing 리스를 SET NX로 선점하면 claimed', async () => {
+    redis.set.mockResolvedValueOnce('OK');
 
-    await expect(store.claim('e1')).resolves.toBe(true);
-    await expect(store.claim('e1')).resolves.toBe(false);
+    await expect(store.claim('e1')).resolves.toBe('claimed');
     expect(redis.set).toHaveBeenCalledWith(
       'sms:event:e1',
       'processing',
@@ -112,10 +116,59 @@ describe('SmsEventDedupeStore', () => {
     );
   });
 
-  it('complete는 24시간짜리 done 마커로 덮어쓴다', async () => {
+  it('선점에 실패하면 완료 마커가 있으면 done, 아니면 in-progress', async () => {
+    redis.set.mockResolvedValue(null);
+    redis.get.mockResolvedValueOnce('done').mockResolvedValueOnce('processing');
+
+    await expect(store.claim('e1')).resolves.toBe('done');
+    await expect(store.claim('e1')).resolves.toBe('in-progress');
+  });
+
+  it('발행 여부는 별도 키(sms:event-published)로 기록하고 조회한다', async () => {
+    redis.exists.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+    await expect(store.isPublished('e1')).resolves.toBe(true);
+    await expect(store.isPublished('e1')).resolves.toBe(false);
+    await store.markPublished('e1');
+    expect(redis.exists).toHaveBeenCalledWith('sms:event-published:e1');
+    expect(redis.set).toHaveBeenCalledWith(
+      'sms:event-published:e1',
+      '1',
+      'EX',
+      604800,
+    );
+  });
+
+  it('SET NX 직후 키가 사라졌다면(GET이 null) 한 번 더 선점을 시도한다', async () => {
+    redis.set.mockResolvedValueOnce(null).mockResolvedValueOnce('OK');
+    redis.get.mockResolvedValueOnce(null);
+
+    await expect(store.claim('e1')).resolves.toBe('claimed');
+    expect(redis.set).toHaveBeenCalledTimes(2);
+  });
+
+  it('두 번 모두 상태를 읽지 못하면 in-progress로 본다 (던져서 재전달)', async () => {
+    redis.set.mockResolvedValue(null);
+    redis.get.mockResolvedValue(null);
+
+    await expect(store.claim('e1')).resolves.toBe('in-progress');
+  });
+
+  it('clearFailureCount는 실패 카운터 키를 지운다', async () => {
+    await store.clearFailureCount('e1');
+
+    expect(redis.del).toHaveBeenCalledWith('sms:event-fail:e1');
+  });
+
+  it('complete는 7일짜리 done 마커로 덮어쓴다 (DLQ 수동 재처리 대비)', async () => {
     await store.complete('e1');
 
-    expect(redis.set).toHaveBeenCalledWith('sms:event:e1', 'done', 'EX', 86400);
+    expect(redis.set).toHaveBeenCalledWith(
+      'sms:event:e1',
+      'done',
+      'EX',
+      604800,
+    );
   });
 
   it('실패 횟수는 INCR로 올리고 TTL은 최초 1회만 건다', async () => {
@@ -135,7 +188,7 @@ describe('SmsEventDedupeStore', () => {
     expect(multiChain.incr).toHaveBeenCalledWith('sms:event-fail:e1');
     expect(multiChain.expire).toHaveBeenCalledWith(
       'sms:event-fail:e1',
-      86400,
+      604800,
       'NX',
     );
   });

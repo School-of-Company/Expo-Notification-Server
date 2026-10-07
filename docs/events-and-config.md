@@ -13,19 +13,29 @@
 User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드민 재발송 포함), 연수 FIELD 신규 등록 때 아웃박스로 발행한다 (연수 PRE는 발행하지 않음).
 전화번호는 하이픈이 있어도 받고 숫자만 남겨 정규화한다. 처리 순서:
 
-1. `eventId` 선점 (이미 처리했거나 처리 중이면 무시)
+1. `eventId` 선점 (이미 끝낸 이벤트면 문자는 건너뛰고 발행만 이어서 시도. 다른 곳에서 처리 중이면 버리지 않고 던져서, 선점이 풀린 뒤 다시 받는다)
 2. Attention `POST /internal/qr-images`로 QR 이미지 URL을 받는다 (`X-Internal-Token`)
 3. 일반/연수 발신번호로 QR 문자 발송 (문의 번호는 `sms.contactStandardNumber`/`contactTraineeNumber`)
-4. 완료 마커로 승격하고, **일반 참가자만** User `POST /internal/participants/sms-try` 호출
+4. 완료 마커로 승격하고, **일반 참가자만** `notification.qr-sms.sent` 이벤트를 발행
 
-`sms-try`는 `eventId`를 받지 않아 재시도하면 발송 횟수가 중복 증가하므로(Expo-User-Server#38) **한 번만 호출하고 실패해도 재시도하지 않는다**(로그만 남김).
-User가 `eventId` 멱등을 지원하면 재시도로 바꾼다.
+### `notification.qr-sms.sent` — QR 문자 발송 완료 (알림 서버 발행, User 소비)
+
+```json
+{ "eventId": "…", "expoId": "…", "participationType": "STANDARD", "id": 42 }
+```
+
+파티션 키는 `eventId`. `eventId`는 소비한 등록 완료 이벤트의 `eventId`를 그대로 쓴다. User가 이 값으로 중복을 걸러 문자 발송 횟수(`smsTryTime`)를 한 번만 올린다.
+일반 참가자(`STANDARD`)만 발행하고 연수자는 발행하지 않으며, 전화번호는 싣지 않는다. User 컨슈머의 dead letter는 `notification.qr-sms.sent.dlt`.
+
+- 문자 발송 상태와 발행 상태를 분리해 둔다. **발행이 실패하면 던져서 Kafka가 재전달하고, 재전달 때는 문자를 다시 보내지 않고 발행만 다시 시도한다.** 같은 `eventId`가 중복 발행돼도 User가 걸러 준다.
+- **발행 실패는 DLQ 실패 횟수에 세지 않는다.** 문자는 이미 나갔으므로 DLQ로 보내면 발송 완료 이벤트가 영영 발행되지 않는다. 그래서 토픽이 없거나 User가 아직 배포되지 않았다면 발행이 성공할 때까지 같은 메시지를 계속 재시도하며 파티션이 막힌다(에러 로그 `qr-sms.sent 발행 실패`로 드러난다). 토픽이 자동 생성되지 않는 환경이라면 배포 전에 `notification.qr-sms.sent`를 만들어 둔다.
+- 이전의 User `sms-try` HTTP 호출은 제거했다 (Expo-User-Server#38/#50에서 이벤트 방식으로 확정). 배포 순서: User의 소비자를 먼저 배포한 뒤 이 서비스를 배포한다.
 
 ### `attention.entry.recorded` — 일반 참가자 입장 (Attention 발행, 설문 문자)
 
 위와 같은 형태의 이벤트. 일반 참가자(`STANDARD`)에게만 설문 링크 문자를 보낸다. 링크는 `sms.surveyUrlTemplate`의 `{expoId}`를 채워 만들고, 템플릿이 없으면 보내지 않는다.
 
-> 두 토픽의 이름과 필드는 User #38, Notification #3의 설명을 기준으로 가정한 것이다. 발행 측과 확정되면 `kafka.topics.*`와 `participant-event.schema.ts`를 맞춘다.
+> `user.participant.registered`는 User 쪽에서 확정했다(Expo-User-Server#50). `attention.entry.recorded`의 이름과 필드는 아직 가정한 값이므로, Attention과 확정되면 `kafka.topics.entryRecorded`와 `participant-event.schema.ts`를 맞춘다.
 
 ### `notification.sms.requested` — 일반 문자 발송 요청
 
@@ -36,10 +46,12 @@ User가 `eventId` 멱등을 지원하면 재시도로 바꾼다.
 | `DRAW_RESULT` | `phoneNumber`, `drawNumber` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정) |
 | `CUSTOM` | `phoneNumbers[1..1000]`, `senderType`, `text` | 본문을 호출 측이 만든 일반/대량 문자 (연수 일정 안내 포함) |
 
-같은 `eventId`는 24시간 동안 한 번만 발송한다. 발송이 전부 실패하면 consumer가 던져 Kafka가 재전달하고, 일부 수신자만 실패하면 재전달하지 않는다(성공한 수신자 중복 발송 방지).
+같은 `eventId`는 7일 동안 한 번만 발송한다(완료 마커 TTL. DLQ를 사람이 며칠 뒤 재처리해도 문자가 중복되지 않게). 그 이후 재전달되면 문자가 다시 나간다. 발송이 전부 실패하면 consumer가 던져 Kafka가 재전달하고, 일부 수신자만 실패하면 재전달하지 않는다(성공한 수신자 중복 발송 방지).
 
 **DLQ** (세 SMS 토픽 공통): 같은 이벤트 처리가 `sms.eventMaxAttempts`(기본 5)번 실패하면 원본 메시지를 `notification.sms.requested.dlq`로 옮기고(`x-source-topic` 헤더에 출처 토픽) 다음 메시지로 넘어간다.
-DLQ 메시지는 원인을 해결한 뒤 수동으로 원 토픽에 다시 넣는다. DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다.
+DLQ로 옮길 때 이벤트별 실패 카운터를 지워서, 재처리한 메시지가 첫 실패에 곧바로 다시 DLQ로 가지 않는다. DLQ 메시지는 원인을 해결한 뒤 7일 안에 수동으로 원 토픽에 다시 넣는다. DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다.
+
+한 가지 한계: 문자 발송 직후 Redis 장애로 완료 표시가 실패하면(3회 재시도 후 로그만 남김), 선점이 만료(5분)된 뒤 재전달 때 문자가 한 번 더 나갈 수 있다.
 
 ### `expo.applicant-count.updated` — 박람회 등록 인원 변경
 
@@ -75,6 +87,7 @@ kafka:
   alarmGroupId: expo-notification-server.alarm
   topics:
     smsRequested: notification.sms.requested
+    qrSmsSent: notification.qr-sms.sent
     participantRegistered: user.participant.registered
     entryRecorded: attention.entry.recorded
     smsDeadLetter: notification.sms.requested.dlq
@@ -94,7 +107,7 @@ sms:                                   # 비밀 값은 Vault
 
 | 위치 | 키 |
 |---|---|
-| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `attention.internalToken`, `user.internalToken` (둘 다 32자 이상, 받는 서비스의 `INTERNAL_TOKEN` 사본) |
+| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `attention.internalToken` (32자 이상, Attention의 `INTERNAL_TOKEN` 사본) |
 
 config-server 쪽에서 해야 할 일: `configs/notification-{local,dev,prod}.yml` 추가, `docs/service-configs.md` 표와
 `src/config/configs-files.spec.ts`의 `SERVICES`에 `notification` 추가.

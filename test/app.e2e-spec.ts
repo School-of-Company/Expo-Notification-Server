@@ -27,7 +27,7 @@ describe('Notification server (e2e)', () => {
   let solapiSend: jest.Mock;
   let fetchSpy: jest.SpyInstance;
   const handlers = new Map<string, EachMessageHandler>();
-  let dlqSend: jest.Mock;
+  let producerSend: jest.Mock;
 
   const emit = (groupId: string, payload: unknown) =>
     handlers.get(groupId)!({
@@ -59,11 +59,11 @@ describe('Notification server (e2e)', () => {
       ),
     );
 
-    dlqSend = jest.fn();
+    producerSend = jest.fn();
     const fakeKafka = {
       producer: () => ({
         connect: jest.fn(),
-        send: dlqSend,
+        send: producerSend,
         disconnect: jest.fn(),
       }),
       consumer: ({ groupId }: { groupId: string }) => ({
@@ -269,12 +269,12 @@ describe('Notification server (e2e)', () => {
           emit(config.kafka.smsGroupId, drawResult),
         ).rejects.toThrow();
       }
-      expect(dlqSend).not.toHaveBeenCalled();
+      expect(producerSend).not.toHaveBeenCalled();
 
       await expect(
         emit(config.kafka.smsGroupId, drawResult),
       ).resolves.toBeUndefined();
-      expect(dlqSend).toHaveBeenCalledWith(
+      expect(producerSend).toHaveBeenCalledWith(
         expect.objectContaining({ topic: config.kafka.topics.smsDeadLetter }),
       );
     });
@@ -304,7 +304,22 @@ describe('Notification server (e2e)', () => {
         urlOf(url).endsWith(suffix),
       );
 
-    it('등록 완료 이벤트: QR URL을 받아 문자를 보내고 sms-try를 호출한다', async () => {
+    const sentEvents = () =>
+      (
+        producerSend.mock.calls as [
+          { topic: string; messages: { key: string; value: string }[] },
+        ][]
+      )
+        .filter(([message]) => message.topic === config.kafka.topics.qrSmsSent)
+        .map(([message]) => ({
+          key: message.messages[0].key,
+          value: JSON.parse(message.messages[0].value) as Record<
+            string,
+            unknown
+          >,
+        }));
+
+    it('등록 완료 이벤트: QR URL을 받아 문자를 보내고 발송 완료 이벤트를 발행한다 (sms-try HTTP 호출은 없다)', async () => {
       await emit(registeredGroup, registered);
 
       expect(callsTo('/internal/qr-images')).toHaveLength(1);
@@ -313,60 +328,85 @@ describe('Notification server (e2e)', () => {
         from: config.sms.fromStandardNumber,
         text: expect.stringContaining('https://s3.test/qr.jpg') as string,
       });
-      const [smsTry] = callsTo('/internal/participants/sms-try');
-      expect(JSON.parse((smsTry[1] as RequestInit).body as string)).toEqual({
-        expoId: 'expo-1',
-        participationType: 'STANDARD',
-        phoneNumber: '01012345678',
-      });
+      expect(sentEvents()).toEqual([
+        {
+          key: 'reg-1',
+          value: {
+            eventId: 'reg-1',
+            expoId: 'expo-1',
+            participationType: 'STANDARD',
+            id: 42,
+          },
+        },
+      ]);
+      expect(callsTo('/internal/participants/sms-try')).toHaveLength(0);
     });
 
-    it('같은 이벤트 재전달은 QR 생성, 문자, sms-try를 다시 하지 않는다 (sms-try 중복 증가 방지)', async () => {
+    it('같은 이벤트 재전달은 QR 생성, 문자, 발행을 다시 하지 않는다', async () => {
       await emit(registeredGroup, registered);
       await emit(registeredGroup, registered);
 
       expect(callsTo('/internal/qr-images')).toHaveLength(1);
       expect(solapiSend).toHaveBeenCalledTimes(1);
-      expect(callsTo('/internal/participants/sms-try')).toHaveLength(1);
+      expect(sentEvents()).toHaveLength(1);
     });
 
-    it('연수자 이벤트는 연수 발신번호로 보내고 sms-try는 호출하지 않는다', async () => {
+    it('연수자 이벤트는 연수 발신번호로 보내고 발송 완료 이벤트는 발행하지 않는다', async () => {
       await emit(registeredGroup, {
         ...registered,
         participationType: 'TRAINEE',
       });
 
       expect(sentBatches()[0][0][0].from).toBe(config.sms.fromTraineeNumber);
-      expect(callsTo('/internal/participants/sms-try')).toHaveLength(0);
+      expect(sentEvents()).toHaveLength(0);
     });
 
-    it('Attention이 실패하면 문자를 보내지 않고 던진 뒤, 재전달되면 다시 시도한다', async () => {
+    it('Attention이 실패하면 문자도 이벤트도 없이 던진 뒤, 재전달되면 다시 시도한다', async () => {
       fetchSpy.mockResolvedValueOnce({ ok: false, status: 503 });
 
       await expect(emit(registeredGroup, registered)).rejects.toThrow();
       expect(solapiSend).not.toHaveBeenCalled();
+      expect(sentEvents()).toHaveLength(0);
 
       await emit(registeredGroup, registered);
       expect(solapiSend).toHaveBeenCalledTimes(1);
+      expect(sentEvents()).toHaveLength(1);
     });
 
-    it('sms-try가 실패해도 던지지 않고 다시 호출하지도 않는다', async () => {
-      fetchSpy.mockImplementation((input: FetchInput) =>
-        Promise.resolve(
-          urlOf(input).endsWith('/internal/qr-images')
-            ? ({
-                ok: true,
-                status: 201,
-                json: () => Promise.resolve({ url: 'https://s3.test/qr.jpg' }),
-              } as Response)
-            : ({ ok: false, status: 500 } as Response),
-        ),
-      );
+    it('발행이 실패해도 재전달 때 문자는 다시 보내지 않고 발행만 다시 시도한다', async () => {
+      producerSend.mockRejectedValueOnce(new Error('broker down'));
 
-      await expect(emit(registeredGroup, registered)).resolves.toBeUndefined();
+      await expect(emit(registeredGroup, registered)).rejects.toThrow(
+        'publish failed',
+      );
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+
       await emit(registeredGroup, registered);
 
-      expect(callsTo('/internal/participants/sms-try')).toHaveLength(1);
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+      expect(callsTo('/internal/qr-images')).toHaveLength(1);
+      expect(sentEvents()).toHaveLength(2);
+    });
+
+    it('발행이 계속 실패해도 DLQ로 보내지 않는다 (문자는 나갔는데 발송 완료 이벤트가 사라지면 안 됨)', async () => {
+      producerSend.mockRejectedValue(new Error('topic missing'));
+
+      for (let i = 0; i < config.sms.eventMaxAttempts + 2; i += 1) {
+        await expect(emit(registeredGroup, registered)).rejects.toThrow();
+      }
+
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+      expect(
+        (producerSend.mock.calls as [{ topic: string }][]).filter(
+          ([message]) => message.topic === config.kafka.topics.smsDeadLetter,
+        ),
+      ).toHaveLength(0);
+
+      producerSend.mockReset();
+      producerSend.mockResolvedValue(undefined);
+      await emit(registeredGroup, registered);
+      expect(sentEvents()).toHaveLength(1);
+      expect(solapiSend).toHaveBeenCalledTimes(1);
     });
 
     it('입장 이벤트: 일반 참가자에게 설문 링크 문자를 보낸다', async () => {

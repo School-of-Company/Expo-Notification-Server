@@ -1,14 +1,16 @@
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Consumer, Kafka, KafkaMessage, Producer } from 'kafkajs';
+import { Consumer, Kafka, KafkaMessage, Partitioners, Producer } from 'kafkajs';
 import { ZodType } from 'zod';
 import { parseKafkaJson } from '../common/kafka-json';
 import { AppConfig } from '../config/app-config';
 import { SmsEventGuard } from './sms-event.guard';
+import { countsTowardDeadLetter } from './sms-errors';
 
 /**
  * 문자 발송 이벤트 consumer 공통부.
  * - 형식이 틀린 메시지는 로그만 남기고 건너뛴다 (던지면 Kafka가 무한 재전달한다).
  * - 처리 실패는 던져서 재전달시키되, `sms.eventMaxAttempts`번 실패하면 원본을 DLQ로 옮기고 넘어간다.
+ *   (발행 실패·처리 중 대기는 횟수에 세지 않는다 — sms-errors.ts)
  */
 export abstract class SmsKafkaConsumer<T extends { eventId: string }>
   implements OnModuleInit, OnModuleDestroy
@@ -28,7 +30,9 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
     private readonly guard: SmsEventGuard,
   ) {
     this.consumer = kafka.consumer({ groupId });
-    this.producer = kafka.producer();
+    this.producer = kafka.producer({
+      createPartitioner: Partitioners.LegacyPartitioner,
+    });
   }
 
   async onModuleInit(): Promise<void> {
@@ -58,6 +62,9 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
     try {
       await this.handle(event);
     } catch (error) {
+      if (!countsTowardDeadLetter(error)) {
+        throw error;
+      }
       const attempts = await this.guard.recordFailure(event.eventId);
       if (attempts < this.config.sms.eventMaxAttempts) {
         throw error;
@@ -72,6 +79,7 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
           },
         ],
       });
+      await this.guard.clearFailures(event.eventId);
       this.logger.error(
         `이벤트를 DLQ로 이동: topic=${this.topic}, eventId=${event.eventId}, attempts=${attempts}`,
         error instanceof Error ? error.message : undefined,

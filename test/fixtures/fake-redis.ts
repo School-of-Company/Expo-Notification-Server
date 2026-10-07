@@ -65,6 +65,18 @@ export class FakeRedis {
     return Promise.resolve('OK');
   }
 
+  get(key: string): Promise<string | null> {
+    return Promise.resolve(this.strings.get(key) ?? null);
+  }
+
+  exists(key: string): Promise<number> {
+    return Promise.resolve(
+      this.strings.has(key) || this.hashes.has(key) || this.sets.has(key)
+        ? 1
+        : 0,
+    );
+  }
+
   del(key: string): Promise<number> {
     return Promise.resolve(this.strings.delete(key) ? 1 : 0);
   }
