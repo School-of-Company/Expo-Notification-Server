@@ -1,6 +1,7 @@
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import { SmsEvent } from './sms-event.schema';
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
+import { SmsEventGuard } from './sms-event.guard';
 import { SmsEventService } from './sms-event.service';
 import { SmsSenderProvider } from './sms-sender.provider';
 
@@ -43,7 +44,7 @@ describe('SmsEventService', () => {
     sender = { send: jest.fn().mockResolvedValue({ total: 1, failedTo: [] }) };
     service = new SmsEventService(
       config,
-      dedupe as unknown as SmsEventDedupeStore,
+      new SmsEventGuard(dedupe as unknown as SmsEventDedupeStore),
       sender as unknown as SmsSenderProvider,
     );
   });
@@ -83,13 +84,6 @@ describe('SmsEventService', () => {
     dedupe.release.mockRejectedValue(new Error('redis down'));
 
     await expect(service.handle(drawResult)).rejects.toThrow('gateway down');
-  });
-
-  it('recordFailure는 이벤트별 실패 횟수를 돌려준다', async () => {
-    dedupe.increaseFailureCount.mockResolvedValue(4);
-
-    await expect(service.recordFailure('e1')).resolves.toBe(4);
-    expect(dedupe.increaseFailureCount).toHaveBeenCalledWith('e1');
   });
 
   it('이미 처리한 eventId는 발송하지 않는다', async () => {

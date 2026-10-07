@@ -5,10 +5,10 @@
 `expo-notification-server` is the notification server for the Expo (startup expo project) MSA.
 It owns two things, both fed by Kafka events from the other services:
 
-- **sms** — sends SMS through Solapi (CoolSMS) from Kafka events (failures past `sms.eventMaxAttempts` go to a DLQ topic), plus the HTTP phone-verification code flow (`POST /sms`, `POST /sms/verify`) with per-number and hourly global send caps
+- **sms** — sends SMS through Solapi (CoolSMS) from Kafka events: User's registration event → QR link SMS (QR image from Attention, then User `sms-try`), Attention's entry event → survey SMS, plus generic `notification.sms.requested` (failures past `sms.eventMaxAttempts` go to a DLQ topic), plus the HTTP phone-verification code flow (`POST /sms`, `POST /sms/verify`) with per-number and hourly global send caps
 - **alarm** — keeps per-expo registration counts in Redis and reports them to Discord hourly (KST), snapshotting "yesterday" at 00:00:30
 
-Settings come from the config server (`GET /configs/notification/:profile`), falling back to env. See
+Registers with Eureka as `expo-notification-server` when `eureka.serviceUrl` is set. Settings come from the config server (`GET /configs/notification/:profile`), falling back to env. See
 `docs/events-and-config.md` for the event contract and config keys.
 
 **Status:** sms + alarm implemented. The producing services (User/Application/Attention/Expo/Form) still need to publish the events.

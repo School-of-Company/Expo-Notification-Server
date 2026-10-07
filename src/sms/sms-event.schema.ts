@@ -11,23 +11,6 @@ const base = {
 export const smsEventSchema = z.discriminatedUnion('type', [
   z.object({
     ...base,
-    type: z.literal('QR_ISSUED'),
-    phoneNumber,
-    senderType,
-    expoName: z.string().min(1),
-    qrUrl: z.url(),
-    contactNumber: z.string().min(1).optional(),
-  }),
-  z.object({
-    ...base,
-    type: z.literal('SURVEY_REQUESTED'),
-    phoneNumber,
-    senderType,
-    expoName: z.string().min(1),
-    surveyUrl: z.url(),
-  }),
-  z.object({
-    ...base,
     type: z.literal('DRAW_RESULT'),
     phoneNumber,
     drawNumber: z.number().int().nonnegative(),

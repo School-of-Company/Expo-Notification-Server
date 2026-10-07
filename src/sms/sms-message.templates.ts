@@ -8,29 +8,6 @@ export interface RenderedSms {
 
 export function renderSms(event: SmsEvent): RenderedSms {
   switch (event.type) {
-    case 'QR_ISSUED': {
-      const lines = [
-        `${event.expoName} 현장 등록이 완료되었습니다.`,
-        `출입 QR코드 링크: ${event.qrUrl}`,
-      ];
-      if (event.contactNumber) {
-        lines.push(`(문의) ☎${event.contactNumber}`);
-      }
-      return {
-        to: [event.phoneNumber],
-        senderType: event.senderType,
-        text: lines.join('\n'),
-      };
-    }
-    case 'SURVEY_REQUESTED':
-      return {
-        to: [event.phoneNumber],
-        senderType: event.senderType,
-        text:
-          event.senderType === 'TRAINEE'
-            ? `박람회 퇴장 문자입니다.\n박람회 만족도 조사에 참가해주세요.\n${event.surveyUrl}`
-            : `${event.expoName} 설문조사\n${event.expoName}을 방문해주셔서 감사합니다. 체험 후 꼭 설문에 응답해주세요.\n${event.surveyUrl}`,
-      };
     case 'DRAW_RESULT':
       return {
         to: [event.phoneNumber],
@@ -44,4 +21,26 @@ export function renderSms(event: SmsEvent): RenderedSms {
         text: event.text,
       };
   }
+}
+
+export function renderQrSms(params: {
+  expoName: string;
+  qrUrl: string;
+  contactNumber?: string;
+}): string {
+  const lines = [
+    `${params.expoName} 현장 등록이 완료되었습니다.`,
+    `출입 QR코드 링크: ${params.qrUrl}`,
+  ];
+  if (params.contactNumber) {
+    lines.push(`(문의) ☎${params.contactNumber}`);
+  }
+  return lines.join('\n');
+}
+
+export function renderSurveySms(params: {
+  expoName: string;
+  surveyUrl: string;
+}): string {
+  return `${params.expoName} 설문조사\n${params.expoName}을 방문해주셔서 감사합니다. 체험 후 꼭 설문에 응답해주세요.\n${params.surveyUrl}`;
 }
