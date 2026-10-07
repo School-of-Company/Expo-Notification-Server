@@ -51,6 +51,7 @@ function configFromEnv(env: Env): Record<string, unknown> {
       topics: pickDefined({
         smsRequested: env.KAFKA_SMS_REQUESTED_TOPIC,
         smsDeadLetter: env.KAFKA_SMS_DEAD_LETTER_TOPIC,
+        qrSmsSent: env.KAFKA_QR_SMS_SENT_TOPIC,
         participantRegistered: env.KAFKA_PARTICIPANT_REGISTERED_TOPIC,
         entryRecorded: env.KAFKA_ENTRY_RECORDED_TOPIC,
         expoApplicantCount: env.KAFKA_EXPO_APPLICANT_COUNT_TOPIC,
@@ -79,10 +80,6 @@ function configFromEnv(env: Env): Record<string, unknown> {
     attention: pickDefined({
       baseUrl: env.ATTENTION_SERVICE_URL,
       internalToken: env.ATTENTION_SERVICE_INTERNAL_TOKEN,
-    }),
-    user: pickDefined({
-      baseUrl: env.USER_SERVICE_URL,
-      internalToken: env.USER_SERVICE_INTERNAL_TOKEN,
     }),
     ...eurekaFromEnv(env),
     discord: pickDefined({

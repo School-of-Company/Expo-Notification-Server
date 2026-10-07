@@ -1,13 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { maskPhone } from '../common/mask-phone';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { AttentionClientProvider } from './attention-client.provider';
 import { ParticipantRegisteredEvent } from './participant-event.schema';
+import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
+import { SmsEventDedupeStore } from './sms-event-dedupe.store';
+import { SentEventPublishError } from './sms-errors';
 import { SmsEventGuard } from './sms-event.guard';
 import { renderQrSms } from './sms-message.templates';
 import { SmsSenderProvider } from './sms-sender.provider';
-import { UserClientProvider } from './user-client.provider';
 
 @Injectable()
 export class QrSmsService {
@@ -16,15 +17,16 @@ export class QrSmsService {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly guard: SmsEventGuard,
+    private readonly dedupe: SmsEventDedupeStore,
     private readonly attention: AttentionClientProvider,
     private readonly sender: SmsSenderProvider,
-    private readonly user: UserClientProvider,
+    private readonly sentPublisher: QrSmsSentPublisher,
   ) {}
 
   async handle(event: ParticipantRegisteredEvent): Promise<void> {
     const standard = event.participationType === 'STANDARD';
 
-    const result = await this.guard.once(event.eventId, async () => {
+    await this.guard.once(event.eventId, async () => {
       const qrUrl = await this.attention.createQrImage({
         participationType: event.participationType,
         id: event.id,
@@ -50,25 +52,42 @@ export class QrSmsService {
       }
     });
 
-    if (result === 'done' && standard) {
-      await this.recordSmsTry(event);
+    // 문자가 이미 나간 이벤트(이번에 실행했거나 이전에 끝냄)만 여기까지 온다. 문자는 다시 보내지 않고 발행만 시도한다.
+    if (standard) {
+      await this.publishSent(event);
     }
   }
 
-  // User의 sms-try는 eventId 멱등이 없어(Expo-User-Server#38) 재시도하면 발송 횟수가 중복 증가한다.
-  // 그래서 문자 발송이 끝난 뒤 한 번만 시도하고, 실패해도 재시도하지 않는다.
-  private async recordSmsTry(event: ParticipantRegisteredEvent): Promise<void> {
+  // 문자 발송 상태(guard)와 발행 상태를 분리해, 발행이 실패해도 재전달 때 문자는 다시 보내지 않고 발행만 재시도한다.
+  // 발행이 중복돼도 User가 eventId로 걸러 준다.
+  private async publishSent(event: ParticipantRegisteredEvent): Promise<void> {
+    // 발행 여부를 못 읽어도 발행한다 — 중복 발행은 User가 eventId로 걸러 준다.
+    const published = await this.dedupe
+      .isPublished(event.eventId)
+      .catch(() => false);
+    if (published) {
+      return;
+    }
     try {
-      await this.user.recordSmsTry({
+      await this.sentPublisher.publish({
+        eventId: event.eventId,
         expoId: event.expoId,
         participationType: event.participationType,
-        phoneNumber: event.phoneNumber,
+        id: event.id,
       });
     } catch (error) {
+      // DLQ 횟수에 세지 않는다: 문자는 이미 나갔는데 DLQ로 보내면 이 이벤트가 영영 발행되지 않는다.
       this.logger.error(
-        `sms-try 호출 실패(재시도하지 않음): eventId=${event.eventId}, phone=${maskPhone(event.phoneNumber)}`,
+        `qr-sms.sent 발행 실패(재전달됨): eventId=${event.eventId}`,
         error instanceof Error ? error.message : undefined,
       );
+      throw new SentEventPublishError('qr-sms.sent publish failed');
     }
+    await this.dedupe.markPublished(event.eventId).catch((error: unknown) => {
+      this.logger.warn(
+        `발행 표시 실패(중복 발행은 User가 걸러 줌): eventId=${event.eventId}`,
+        error instanceof Error ? error.message : undefined,
+      );
+    });
   }
 }

@@ -36,7 +36,7 @@ describe('SmsEventService', () => {
 
   beforeEach(() => {
     dedupe = {
-      claim: jest.fn().mockResolvedValue(true),
+      claim: jest.fn().mockResolvedValue('claimed'),
       complete: jest.fn(),
       release: jest.fn().mockResolvedValue(undefined),
       increaseFailureCount: jest.fn().mockResolvedValue(1),
@@ -87,12 +87,19 @@ describe('SmsEventService', () => {
   });
 
   it('이미 처리한 eventId는 발송하지 않는다', async () => {
-    dedupe.claim.mockResolvedValue(false);
+    dedupe.claim.mockResolvedValue('done');
 
     await service.handle(drawResult);
 
     expect(sender.send).not.toHaveBeenCalled();
     expect(dedupe.release).not.toHaveBeenCalled();
+  });
+
+  it('다른 곳에서 처리 중이면 보내지 않고 던진다 (조용히 버리면 선점을 쥔 쪽이 죽었을 때 유실)', async () => {
+    dedupe.claim.mockResolvedValue('in-progress');
+
+    await expect(service.handle(drawResult)).rejects.toThrow('being processed');
+    expect(sender.send).not.toHaveBeenCalled();
   });
 
   it('전부 실패하면 claim을 풀고 던져서 재시도되게 한다', async () => {

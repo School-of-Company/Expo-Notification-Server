@@ -9,8 +9,6 @@ const baseEnv = {
   SMS_FROM_TRAINEE_NUMBER: '0623804587',
   ATTENTION_SERVICE_URL: 'http://attention:8080',
   ATTENTION_SERVICE_INTERNAL_TOKEN: 'a'.repeat(32),
-  USER_SERVICE_URL: 'http://user:8080',
-  USER_SERVICE_INTERNAL_TOKEN: 'u'.repeat(32),
 };
 
 const jsonResponse = (body: unknown, status = 200) => ({
@@ -25,6 +23,7 @@ describe('loadConfig', () => {
 
     expect(config.kafka.brokers).toEqual(['kafka-1:9092', 'kafka-2:9092']);
     expect(config.kafka.topics.smsRequested).toBe('notification.sms.requested');
+    expect(config.kafka.topics.qrSmsSent).toBe('notification.qr-sms.sent');
     expect(config.redis).toEqual({ host: 'redis', port: 6379 });
     expect(config.sms.authCodeTtlSeconds).toBe(180);
     expect(config.port).toBe(3000);
@@ -68,11 +67,11 @@ describe('loadConfig', () => {
 
   it('내부 호출 토큰이 32자 미만이면 부팅을 실패시킨다 (토큰 값은 노출하지 않는다)', async () => {
     const promise = loadConfig(
-      { ...baseEnv, USER_SERVICE_INTERNAL_TOKEN: 'short-secret' },
+      { ...baseEnv, ATTENTION_SERVICE_INTERNAL_TOKEN: 'short-secret' },
       jest.fn(),
     );
 
-    await expect(promise).rejects.toThrow(/user\.internalToken/);
+    await expect(promise).rejects.toThrow(/attention\.internalToken/);
     await expect(promise).rejects.not.toThrow(/short-secret/);
   });
 

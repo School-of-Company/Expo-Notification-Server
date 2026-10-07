@@ -1,6 +1,7 @@
 import { EachMessageHandler } from 'kafkajs';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import { SmsEventConsumer } from './sms-event.consumer';
+import { EventInProgressError, SentEventPublishError } from './sms-errors';
 import { SmsEventGuard } from './sms-event.guard';
 import { SmsEventService } from './sms-event.service';
 
@@ -31,7 +32,7 @@ describe('SmsEventConsumer', () => {
   let producer: { connect: jest.Mock; send: jest.Mock; disconnect: jest.Mock };
   let kafka: { consumer: jest.Mock; producer: jest.Mock };
   let service: { handle: jest.Mock };
-  let guard: { recordFailure: jest.Mock };
+  let guard: { recordFailure: jest.Mock; clearFailures: jest.Mock };
   let eachMessage: EachMessageHandler;
   let consumer: SmsEventConsumer;
 
@@ -50,7 +51,10 @@ describe('SmsEventConsumer', () => {
       producer: jest.fn().mockReturnValue(producer),
     };
     service = { handle: jest.fn() };
-    guard = { recordFailure: jest.fn().mockResolvedValue(1) };
+    guard = {
+      recordFailure: jest.fn().mockResolvedValue(1),
+      clearFailures: jest.fn(),
+    };
     consumer = new SmsEventConsumer(
       kafka as never,
       config,
@@ -119,6 +123,29 @@ describe('SmsEventConsumer', () => {
       ],
     });
   });
+
+  it('DLQ로 보낼 때 실패 카운터를 지운다 (DLQ 재처리가 곧바로 다시 DLQ로 가지 않게)', async () => {
+    service.handle.mockRejectedValue(new Error('insufficient balance'));
+    guard.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts);
+
+    await eachMessage(toMessage(drawResult));
+
+    expect(guard.clearFailures).toHaveBeenCalledWith('e1');
+  });
+
+  it.each([
+    ['발행 실패', new SentEventPublishError('publish failed')],
+    ['처리 중 대기', new EventInProgressError('in progress')],
+  ])(
+    '%s는 실패 횟수에 세지 않고 던진다 (DLQ로 보내면 이벤트가 사라짐)',
+    async (_name, error) => {
+      service.handle.mockRejectedValue(error);
+
+      await expect(eachMessage(toMessage(drawResult))).rejects.toBe(error);
+      expect(guard.recordFailure).not.toHaveBeenCalled();
+      expect(producer.send).not.toHaveBeenCalled();
+    },
+  );
 
   it('DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다', async () => {
     service.handle.mockRejectedValue(new Error('insufficient balance'));
