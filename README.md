@@ -44,7 +44,36 @@ $ pnpm run start:dev
 $ pnpm run start:prod
 ```
 
-## Run tests
+## CI
+
+PRs targeting `develop` or `main` run `pr-title`, `lint`, and `verify` on
+opened, edited, synchronize, and reopened events. Titles may use the existing
+plain-language convention; only blank titles and control characters are rejected.
+
+CI uses Node.js 22.23.3 and pnpm 11.10.0 (pinned in `package.json`), with a pnpm
+cache and frozen lockfile installation. Only `@swc/core` dependency builds are
+approved in `pnpm-workspace.yaml`; the approval policy is not disabled.
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run lint:ci
+pnpm exec tsc --noEmit --incremental false
+pnpm test --runInBand
+pnpm test:e2e --runInBand
+pnpm run build
+```
+
+`lint:ci` checks without modifying files; `lint` retains its local auto-fix behavior.
+Unit tests and HTTP e2e use mocked Kafka, Redis, Solapi, and external HTTP providers.
+No production credentials or running services are needed. The local Kafka/Redis
+Compose stack is not started by CI; real-service integration checks remain separate.
+CI does not deploy or send Discord notifications, so no webhook secret is required.
+
+The reference is Expo-Form-Server's `.github/workflows/ci.yml`, retrieved via
+`gh api repos/School-of-Company/Expo-Form-Server/contents/.github/workflows/ci.yml`:
+blob SHA `4468cd04b5aba0cb7146165287e5240e22dbb63f`.
+
+## Run tests locally
 
 ```bash
 # unit tests
