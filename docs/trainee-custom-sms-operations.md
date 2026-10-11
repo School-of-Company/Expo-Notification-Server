@@ -141,7 +141,9 @@ group의 사전 발행 메시지는 별도 복구 대상으로 판단한다. 기
 2026-10-12 저장소 확인에서 `deploy.yml`은 `develop`에만 있고 기본 브랜치 `main`에는
 없었다. 기존 `gh run list --workflow deploy.yml`의 404는 배포 성공/실패의 증거가 아니다.
 실제 배포 SHA, 배포된 7일 TTL 및 consumer 구독/offset 준비 증거를 담당자가 확인하기
-전에는 #8 운영 조건 완료를 선언하거나 이슈를 닫지 않는다.
+전에는 운영 조건 완료를 선언하거나 #27을 닫지 않는다. #8은 개발 완료로 닫혔으며,
+남은 운영 확인은 #27에서 관리한다. 읽기 전용 조사 결과와 DevOps 확인 명령은
+[Notification #27 운영 확인 runbook](notification-27-deployment-check.md)에 기록한다.
 Application 외부 성공 직후 Expo 프로세스 중단이나
 HTTP 응답 유실의 성공 여부 확인은 Notification 책임이 아니며 outbox만으로 해결했다고 설명하지 않는다.
 
