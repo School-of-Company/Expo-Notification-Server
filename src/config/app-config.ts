@@ -54,7 +54,7 @@ export const appConfigSchema = z.object({
     authMaxSendCount: z.coerce.number().int().positive().default(5),
     authMaxSendCountPerHour: z.coerce.number().int().positive().default(300),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),
-    expoName: z.string().min(1).default('박람회'),
+    expoName: z.string().min(1).default('AI 미래교육 페스타'),
     contactStandardNumber: z.string().min(1).optional(),
     contactTraineeNumber: z.string().min(1).optional(),
     qrUrlTemplate: z.string().trim().optional(),
@@ -62,6 +62,20 @@ export const appConfigSchema = z.object({
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
   }),
   user: serviceClient.optional(),
+  promotion: z
+    .object({
+      enabled: z
+        .union([
+          z.boolean(),
+          z.enum(['true', 'false']).transform((value) => value === 'true'),
+        ])
+        .default(false),
+      application: serviceClient,
+      internalToken: z.string().min(32),
+      topic: z.string().min(1).default('application.program-session.promoted'),
+      groupId: z.string().min(1).default('expo-notification-server.promotion'),
+    })
+    .optional(),
   eureka: z
     .object({
       serviceUrl: z.union([z.string().min(1), z.array(z.string().min(1))]),

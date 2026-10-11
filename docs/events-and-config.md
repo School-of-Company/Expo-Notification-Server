@@ -184,3 +184,8 @@ config-server 쪽에서 해야 할 일: `configs/notification-{local,dev,prod}.y
 
 TRAINEE CUSTOM의 실제 Kafka/Redis 통합 테스트, 7일 완료 마커, DLQ 재처리 및
 초기 group offset 준비 절차는 [연수 CUSTOM 운영 문서](trainee-custom-sms-operations.md)를 참고한다.
+
+프로그램 대기 승급은 별도 topic/원장/재시도 흐름을 사용한다.
+[Notification #20 계약](notification-20-contract.md)에 수신 JSON, 필요한 Application 검증 API,
+Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행기/API는 아직 연결되지 않았으며
+`promotion.enabled`는 기본 비활성이다. 기존 CUSTOM 이벤트로 승급 안내를 대체하지 않는다.
