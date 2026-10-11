@@ -16,6 +16,18 @@ const serviceClient = z.object({
 
 export const appConfigSchema = z.object({
   port: z.coerce.number().int().positive().default(3000),
+  swagger: z
+    .object({
+      enabled: z
+        .stringbool({ truthy: ['true'], falsy: ['false'] })
+        .or(z.boolean())
+        .default(false),
+      includeInternal: z
+        .stringbool({ truthy: ['true'], falsy: ['false'] })
+        .or(z.boolean())
+        .default(false),
+    })
+    .prefault({}),
   kafka: z.object({
     brokers,
     clientId: z.string().min(1).default('expo-notification-server'),
