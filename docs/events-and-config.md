@@ -2,21 +2,40 @@
 
 ## Kafka 이벤트
 
-공통: JSON, UTF-8. `eventId`(멱등키)와 `version`(현재 `1`)은 필수. 스키마가 틀린 메시지는 로그만 남기고 건너뛴다.
+공통: JSON, UTF-8. `eventId`는 멱등키다. 일반 문자/집계 이벤트의 `version`은 현재 `1`; User 등록/입장 이벤트에는 요구하지 않는다. 스키마가 틀린 메시지는 값 없이 검증 사유만 로그에 남기고 건너뛴다.
 
 ### `user.participant.registered` — 등록 완료 (User 발행, QR 문자)
 
 ```json
-{ "eventId": "…", "expoId": "…", "participationType": "STANDARD", "id": 42, "phoneNumber": "010-1234-5678" }
+{ "eventId": "…", "expoId": "…", "participationType": "STANDARD", "id": 42, "phoneNumber": "010-1234-5678", "representativeId": 42, "participants": [{ "id": 42, "code": "abcdefghijklmnopqrstuv" }, { "id": 43, "code": "ABCDEFGHIJKLMNOPQRSTUV" }] }
 ```
 
 User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드민 재발송 포함), 연수 FIELD 신규 등록 때 아웃박스로 발행한다 (연수 PRE는 발행하지 않음).
 전화번호는 하이픈이 있어도 받고 숫자만 남겨 정규화한다. 처리 순서:
 
 1. `eventId` 선점 (이미 끝낸 이벤트면 문자는 건너뛰고 발행만 이어서 시도. 다른 곳에서 처리 중이면 버리지 않고 던져서, 선점이 풀린 뒤 다시 받는다)
-2. Attention `POST /internal/qr-images`로 QR 이미지 URL을 받는다 (`X-Internal-Token`)
-3. 일반/연수 발신번호로 QR 문자 발송 (문의 번호는 `sms.contactStandardNumber`/`contactTraineeNumber`)
+2. 이벤트 목록만큼 프론트 `/qr` 링크를 만들고, STANDARD는 User `POST /internal/standard-participants/names`로 이름을 한 번 조회한다 (`X-Internal-Token`)
+3. 대표자 번호로 줄바꿈한 링크들을 한 통 발송한다 (일반/연수 발신번호와 문의 번호는 기존 설정 사용)
 4. 완료 마커로 승격하고, **일반 참가자만** `notification.qr-sms.sent` 이벤트를 발행
+
+`participants`는 이번 문자 대상(1~5명)이다. 새 동행자 추가는 새 동행자만, 재발송은 기존 전체다. 대표자는 `representativeId ?? id`로 판별하고 존재할 때만 먼저 표시한다. 나머지는 이벤트 순서를 유지하며 목록에 없는 대표자를 추가하지 않는다. 완료 이벤트의 `id`도 `representativeId ?? id`다.
+
+이름은 이벤트에서 읽지 않는다. 이름 조회 요청은 `{expoId, participantIds}`, 응답은 요청 순서대로 `[{participantId,name}]`다. 이름이 있으면 `이름(대표자): 링크` / `이름: 링크`, 없으면 `대표자: 링크` / `동행자 1: 링크`를 사용한다. 이름 API 미설정, 404/401/5xx, 연결/JSON 실패, 잘못된 ID/순서/이름 응답은 전체 이름을 역할 라벨로 대체하고 발송을 계속한다. 선택 조회가 발송을 오래 막지 않게 공통 HTTP 기본 10초 대신 2초 timeout을 적용한다. 이름/전화번호/code/완성 링크나 원문 응답/오류는 QR 처리 로그에 남기지 않는다.
+
+### QR 링크 설정과 미발송 정책
+
+- STANDARD: `sms.qrUrlTemplate` / `SMS_QR_URL_TEMPLATE`
+  `https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&code={code}`
+- TRAINEE FIELD: `sms.traineeQrUrlTemplate` / `SMS_TRAINEE_QR_URL_TEMPLATE`
+  `https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}`
+- 두 형식은 다르므로 연수자에 STANDARD 템플릿을 대신 사용하지 않는다. 연수자는 Client의 기존 `{traineeId,phoneNumber}` QR를 유지하며 전화번호가 URL에 남는다. 일행 페이지/token 발급이나 일반 code 생성은 하지 않는다.
+- 치환 값은 URI 인코딩한다. HTTPS, 정확한 `/qr` 경로와 쿼리 이름/값/개수, 필수 placeholder를 검증한다. ID는 positive safe integer, STANDARD code는 영문·숫자·`_`·`-` 22자다. 자격증명/fragment/추가 쿼리를 허용하지 않는다.
+- 해당 유형의 템플릿이 없거나 비어 있으면 **선점·발송·완료 표시·완료 이벤트 발행을 모두 하지 않는다**. Kafka 처리는 정상 종료되므로 활성화 뒤 자동 재전달되지 않는다. 운영자는 필요한 이벤트를 선별해 재생해야 한다.
+- 비어 있지 않은 잘못된 템플릿, STANDARD의 누락된 participants/code, 한 통 길이 상한 초과는 발송 없이 실패하며 선점을 해제한다. 기존 최대 재시도 후 DLQ 정책을 사용한다. 성공을 거짓 기록하지 않는다.
+- code 형식 오류/중복 ID/빈 목록/6명 이상/잘못된 ID 등 스키마 오류는 기존 소비 정책대로 로그 후 건너뛰며 미발송한다. 원본을 복구하려면 운영 원본 이벤트 보관이 필요하다.
+- 구버전 STANDARD 이벤트에 code/목록이 없으면 번호로 QR를 생성하거나 code를 추측하지 않는다. 현재 User resolve API는 ID만 반환하고 names API도 code를 반환하지 않는다. User에서 현재 저장된 QR로 새 등록/재발송 이벤트를 생산하거나, 원본 outbox 목록이 있는 경우 공급자가 복구한 이벤트를 재생해야 한다. 구버전의 `done-v2`는 이미 발송한 문자이므로 완료 발행만 이어가고 `done`은 모두 건너뛴다.
+
+[Solapi 공식 발송 계약](https://solapi.com/developers/api/messages)에 따르면 `autoTypeDetect` 기본값은 true이고 type 생략 시 90바이트 초과는 LMS(2,000바이트 상한)로 전환된다. 설치 SDK 6.0.1의 `send`는 타입을 생략한 메시지를 `messages/v4/send-many/detail`에 그대로 전달한다. QR 본문의 UTF-8 크기를 보수적으로 2,000바이트 이하로 제한하며 초과 시 나누어 보내지 않는다. 한글은 통신사 기준 2바이트지만 UTF-8에서는 3바이트여서 실제 LMS에 들어갈 일부 긴 본문도 미발송될 수 있다. 운영 Client 도메인/행사명/문의번호를 반영한 5명 본문으로 최종 길이를 확인해야 한다.
 
 ### `notification.qr-sms.sent` — QR 문자 발송 완료 (알림 서버 발행, User 소비)
 
@@ -35,7 +54,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 
 ### `attention.entry.recorded` — 일반 참가자 입장 (Attention 발행, 설문 문자)
 
-위와 같은 형태의 이벤트. 일반 참가자(`STANDARD`)에게만 설문 링크 문자를 보낸다. 링크는 `sms.surveyUrlTemplate`의 `{expoId}`를 채워 만들고, 템플릿이 없으면 보내지 않는다.
+`{eventId, expoId, participationType, id, phoneNumber}` 형태의 이벤트. 일반 참가자(`STANDARD`)에게만 설문 링크 문자를 보낸다. 링크는 `sms.surveyUrlTemplate`의 `{expoId}`를 채워 만들고, 템플릿이 없으면 보내지 않는다.
 
 > `user.participant.registered`는 User 쪽에서 확정했다(Expo-User-Server#50). `attention.entry.recorded`의 이름과 필드는 아직 가정한 값이므로, Attention과 확정되면 `kafka.topics.entryRecorded`와 `participant-event.schema.ts`를 맞춘다.
 
@@ -107,11 +126,18 @@ sms:                                   # 비밀 값은 Vault
   authMaxSendCountPerHour: 300
   eventMaxAttempts: 5
   authMaxVerifyAttemptCount: 5
+  qrUrlTemplate: ""                     # 비어 있으면 일반 QR 문자 미발송
+  traineeQrUrlTemplate: ""              # 비어 있으면 연수 QR 문자 미발송
+user:                                  # 이름 조회 전용, 통째로 생략하면 역할 라벨
+  baseUrl: "http://<USER_HOST>:8080"
+  internalToken: "…"                    # Vault, 32자 이상
 ```
 
 | 위치 | 키 |
 |---|---|
-| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `attention.internalToken` (32자 이상, Attention의 `INTERNAL_TOKEN` 사본) |
+| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회 전용) |
+
+env 이름 조회 키는 `USER_SERVICE_URL`, `USER_SERVICE_INTERNAL_TOKEN`이다. 둘 다 없으면 fallback하고 일부만 설정되었거나 토큰/URL이 잘못되면 부팅을 실패시킨다. Attention HTTP 설정은 제거했다. User 이름 API만 사용하며 제거된 `sms-try` HTTP 호출은 복구하지 않는다.
 
 config-server 쪽에서 해야 할 일: `configs/notification-{local,dev,prod}.yml` 추가, `docs/service-configs.md` 표와
 `src/config/configs-files.spec.ts`의 `SERVICES`에 `notification` 추가.

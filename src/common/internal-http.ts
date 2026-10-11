@@ -8,6 +8,7 @@ export async function postInternal(
   path: string,
   token: string,
   body: unknown,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   let response: Response;
   try {
@@ -18,7 +19,7 @@ export async function postInternal(
         'X-Internal-Token': token,
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new InternalCallError(`${service} unreachable`);

@@ -1,11 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
-import { AttentionClientProvider } from './attention-client.provider';
+import { ParticipantNamesProvider } from './participant-names.provider';
+import { buildQrPageLinks } from './qr-page-links';
 import { ParticipantRegisteredEvent } from './participant-event.schema';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
-import { SentEventPublishError } from './sms-errors';
+import { QrLinkError, SentEventPublishError } from './sms-errors';
 import { SmsEventGuard } from './sms-event.guard';
 import { renderQrSms } from './sms-message.templates';
 import { SmsSenderProvider } from './sms-sender.provider';
@@ -18,33 +19,62 @@ export class QrSmsService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly guard: SmsEventGuard,
     private readonly dedupe: SmsEventDedupeStore,
-    private readonly attention: AttentionClientProvider,
+    private readonly names: ParticipantNamesProvider,
     private readonly sender: SmsSenderProvider,
     private readonly sentPublisher: QrSmsSentPublisher,
   ) {}
 
   async handle(event: ParticipantRegisteredEvent): Promise<void> {
     const standard = event.participationType === 'STANDARD';
+    const template = standard
+      ? this.config.sms.qrUrlTemplate
+      : this.config.sms.traineeQrUrlTemplate;
+    if (!template?.trim()) {
+      this.logger.warn(
+        `QR 문자 템플릿 미설정으로 미발송: eventId=${event.eventId}`,
+      );
+      return;
+    }
 
     const result = await this.guard.once(event.eventId, async () => {
-      const qrUrl = await this.attention.createQrImage({
-        participationType: event.participationType,
-        id: event.id,
-        phoneNumber: event.phoneNumber,
+      const links = buildQrPageLinks(template, event);
+      const names = standard
+        ? await this.names.findNames({
+            expoId: event.expoId,
+            participantIds: links.map(({ id }) => id),
+          })
+        : new Map<number, string>();
+      let companionNumber = 0;
+      const text = renderQrSms({
+        expoName: this.config.sms.expoName,
+        links: links.map(({ id, url }) => {
+          const representative = id === (event.representativeId ?? event.id);
+          const name = names.get(id);
+          let label = '연수자';
+          if (standard) {
+            if (representative) {
+              label = name ? `${name}(대표자)` : '대표자';
+            } else {
+              companionNumber += 1;
+              label = name ?? `동행자 ${companionNumber}`;
+            }
+          }
+          return { label, url };
+        }),
+        contactNumber: standard
+          ? this.config.sms.contactStandardNumber
+          : this.config.sms.contactTraineeNumber,
       });
+      if (Buffer.byteLength(text, 'utf8') > 2_000) {
+        throw new QrLinkError('QR SMS exceeds single LMS byte limit');
+      }
       const { failedTo } = await this.sender.send([
         {
           to: event.phoneNumber,
           from: standard
             ? this.config.sms.fromStandardNumber
             : this.config.sms.fromTraineeNumber,
-          text: renderQrSms({
-            expoName: this.config.sms.expoName,
-            qrUrl,
-            contactNumber: standard
-              ? this.config.sms.contactStandardNumber
-              : this.config.sms.contactTraineeNumber,
-          }),
+          text,
         },
       ]);
       if (failedTo.length > 0) {
@@ -73,7 +103,7 @@ export class QrSmsService {
         eventId: event.eventId,
         expoId: event.expoId,
         participationType: event.participationType,
-        id: event.id,
+        id: event.representativeId ?? event.id,
       });
     } catch (error) {
       // DLQ 횟수에 세지 않는다: 문자는 이미 나갔는데 DLQ로 보내면 이 이벤트가 영영 발행되지 않는다.
