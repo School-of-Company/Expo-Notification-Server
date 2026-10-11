@@ -82,9 +82,9 @@ describe('SmsEventService', () => {
   it('같은 대표 번호의 서로 다른 연수자 이벤트는 각각 발송하고 재전달은 억제한다', async () => {
     const claimed = new Set<string>();
     dedupe.claim.mockImplementation((eventId: string) => {
-      if (claimed.has(eventId)) return Promise.resolve(false);
+      if (claimed.has(eventId)) return Promise.resolve('done');
       claimed.add(eventId);
-      return Promise.resolve(true);
+      return Promise.resolve('claimed');
     });
     const first: SmsEvent = {
       ...custom,
