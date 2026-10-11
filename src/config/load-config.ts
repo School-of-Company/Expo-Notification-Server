@@ -102,6 +102,17 @@ function configFromEnv(env: Env): Record<string, unknown> {
         }),
       },
     }),
+    ...((env.ADMIN_GROUP_MESSAGING_ENABLED ||
+      env.ADMIN_GROUP_MESSAGING_INTERNAL_TOKEN) && {
+      adminGroupMessaging: pickDefined({
+        enabled: env.ADMIN_GROUP_MESSAGING_ENABLED,
+        internalToken: env.ADMIN_GROUP_MESSAGING_INTERNAL_TOKEN,
+        previewTtlSeconds: env.ADMIN_GROUP_MESSAGING_PREVIEW_TTL_SECONDS,
+        authorizationTtlSeconds:
+          env.ADMIN_GROUP_MESSAGING_AUTHORIZATION_TTL_SECONDS,
+        retentionSeconds: env.ADMIN_GROUP_MESSAGING_RETENTION_SECONDS,
+      }),
+    }),
     discord: pickDefined({
       participantNumberUrl: env.DISCORD_PARTICIPANT_NUMBER_URL,
     }),

@@ -1,0 +1,136 @@
+{
+  "scenario": "actual Notification HTTP + real Redis + fake provider",
+  "verdict": "PASS",
+  "unauthenticated": 403,
+  "config": {
+    "enabled": true,
+    "channels": {
+      "SMS": {
+        "enabled": true
+      },
+      "KAKAO": {
+        "enabled": false,
+        "templates": []
+      }
+    },
+    "smsFallbackDefault": false
+  },
+  "preview": {
+    "previewId": "00526b55-a724-4079-9ff0-669d30040e3f",
+    "targetFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "applicationCount": 3,
+    "recipientCount": 1,
+    "messageCount": 2,
+    "targetCount": 3,
+    "sendableCount": 2,
+    "missingCount": 1,
+    "expiresAt": "2026-10-11T19:18:27.352Z",
+    "items": [
+      {
+        "targetId": "p1",
+        "applicationId": "00000000-0000-4000-8000-000000000011",
+        "participantId": 1,
+        "recipientMasked": "010****0000",
+        "content": "Synthetic Alice personal notice"
+      },
+      {
+        "targetId": "p2",
+        "applicationId": "00000000-0000-4000-8000-000000000012",
+        "participantId": 2,
+        "recipientMasked": "010****0000",
+        "content": "Synthetic Bob personal notice"
+      },
+      {
+        "targetId": "missing",
+        "applicationId": "00000000-0000-4000-8000-000000000013",
+        "participantId": 3,
+        "missingReason": "MISSING_REPRESENTATIVE_PHONE"
+      }
+    ]
+  },
+  "duplicateJobIdStable": true,
+  "ownershipAndFingerprintConflicts": 409,
+  "acceptedBeforeDelivered": true,
+  "job": {
+    "jobId": "f102e70f2345e9e4ead1eaa52e88d53d6cc2ca272435d16e168bcd2ca5c72b40",
+    "previewId": "00526b55-a724-4079-9ff0-669d30040e3f",
+    "status": "COMPLETED",
+    "createdAt": "2026-10-11T18:48:27.374Z",
+    "counts": {
+      "total": 3,
+      "pending": 0,
+      "sending": 0,
+      "accepted": 0,
+      "delivered": 2,
+      "failed": 0,
+      "unknown": 0,
+      "missing": 1
+    },
+    "items": [
+      {
+        "targetId": "p1",
+        "applicationId": "00000000-0000-4000-8000-000000000011",
+        "participantId": 1,
+        "recipientMasked": "010****0000",
+        "status": "DELIVERED",
+        "providerCode": "4000"
+      },
+      {
+        "targetId": "p2",
+        "applicationId": "00000000-0000-4000-8000-000000000012",
+        "participantId": 2,
+        "recipientMasked": "010****0000",
+        "status": "DELIVERED",
+        "providerCode": "4000"
+      },
+      {
+        "targetId": "missing",
+        "applicationId": "00000000-0000-4000-8000-000000000013",
+        "participantId": 3,
+        "status": "MISSING",
+        "missingReason": "MISSING_REPRESENTATIVE_PHONE"
+      }
+    ]
+  },
+  "retryOfDelivered": {
+    "jobId": "f102e70f2345e9e4ead1eaa52e88d53d6cc2ca272435d16e168bcd2ca5c72b40",
+    "previewId": "00526b55-a724-4079-9ff0-669d30040e3f",
+    "status": "COMPLETED",
+    "createdAt": "2026-10-11T18:48:27.374Z",
+    "counts": {
+      "total": 3,
+      "pending": 0,
+      "sending": 0,
+      "accepted": 0,
+      "delivered": 2,
+      "failed": 0,
+      "unknown": 0,
+      "missing": 1
+    },
+    "items": [
+      {
+        "targetId": "p1",
+        "applicationId": "00000000-0000-4000-8000-000000000011",
+        "participantId": 1,
+        "recipientMasked": "010****0000",
+        "status": "DELIVERED",
+        "providerCode": "4000"
+      },
+      {
+        "targetId": "p2",
+        "applicationId": "00000000-0000-4000-8000-000000000012",
+        "participantId": 2,
+        "recipientMasked": "010****0000",
+        "status": "DELIVERED",
+        "providerCode": "4000"
+      },
+      {
+        "targetId": "missing",
+        "applicationId": "00000000-0000-4000-8000-000000000013",
+        "participantId": 3,
+        "status": "MISSING",
+        "missingReason": "MISSING_REPRESENTATIVE_PHONE"
+      }
+    ]
+  }
+}
