@@ -47,7 +47,7 @@ describe('CUSTOM with isolated Kafka/Redis and fake sender', () => {
       ),
     ).toBe(true);
     expect(await runtime.redis.get(`sms:event:${payload.eventId}`)).toBe(
-      'done',
+      'done-v2',
     );
     const ttl = await runtime.redis.ttl(`sms:event:${payload.eventId}`);
     expect(ttl).toBeGreaterThan(604740);
@@ -103,7 +103,7 @@ describe('CUSTOM with isolated Kafka/Redis and fake sender', () => {
       await runtime.committed(2);
       expect(runtime.sender.calls.length).toBe(5);
       expect(await runtime.redis.get(`sms:event:${payload.eventId}`)).toBe(
-        'done',
+        'done-v2',
       );
       expect(await runtime.redis.get(`sms:event-fail:${payload.eventId}`)).toBe(
         '1',
@@ -187,7 +187,7 @@ describe('CUSTOM with isolated Kafka/Redis and fake sender', () => {
     await runtime.committed(2);
     expect(runtime.sender.calls.length).toBe(2);
     expect(await runtime.redis.get(`sms:event:${payload.eventId}`)).toBe(
-      'done',
+      'done-v2',
     );
   });
 
@@ -202,7 +202,7 @@ describe('CUSTOM with isolated Kafka/Redis and fake sender', () => {
     expect(runtime.store.completionAttempts - before).toBe(3);
     expect(runtime.sender.calls.length).toBe(1);
     expect(await runtime.redis.get(`sms:event:${payload.eventId}`)).toBe(
-      'done',
+      'done-v2',
     );
   });
 
@@ -216,7 +216,9 @@ describe('CUSTOM with isolated Kafka/Redis and fake sender', () => {
     await runtime.publish(fresh);
     await runtime.committed(2);
     expect(runtime.sender.calls.length).toBe(1);
-    expect(await runtime.redis.get(`sms:event:${fresh.eventId}`)).toBe('done');
+    expect(await runtime.redis.get(`sms:event:${fresh.eventId}`)).toBe(
+      'done-v2',
+    );
   });
 
   it('resumes committed offsets on restart, consumes offline traffic and suppresses replay', async () => {
@@ -232,7 +234,7 @@ describe('CUSTOM with isolated Kafka/Redis and fake sender', () => {
     await runtime.committed(3);
     expect(runtime.sender.calls.length).toBe(2);
     expect(await runtime.redis.get(`sms:event:${offline.eventId}`)).toBe(
-      'done',
+      'done-v2',
     );
   });
 });
