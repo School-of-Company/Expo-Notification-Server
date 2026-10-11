@@ -1,0 +1,50 @@
+{
+  "kind": "Jest summary without local paths or execution timestamps",
+  "baseSha": "11bee4d72ccbbe663556052baa599c29a08a6c4c",
+  "success": true,
+  "passedTests": 10,
+  "failedTests": 0,
+  "passedSuites": 2,
+  "tests": [
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender selects TRAINEE sender, preserves CUSTOM body, suppresses same ID and sends new ID",
+      "status": "passed"
+    },
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender retries total failures, moves original to DLQ, clears counter and recovers same ID",
+      "status": "passed"
+    },
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender keeps processing waits out of failure budget and resumes after lease release",
+      "status": "passed"
+    },
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender retains lease after three completion failures and suppresses immediate redelivery",
+      "status": "passed"
+    },
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender demonstrates duplicate risk after successful send and failed marker lease expiry",
+      "status": "passed"
+    },
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender recovers transient Redis completion errors within three attempts",
+      "status": "passed"
+    },
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender starts a new group at latest and skips messages published before subscription",
+      "status": "passed"
+    },
+    {
+      "name": "CUSTOM with isolated Kafka/Redis and fake sender resumes committed offsets on restart, consumes offline traffic and suppresses replay",
+      "status": "passed"
+    },
+    {
+      "name": "integration container cleanup attempts every owned container when one removal fails",
+      "status": "passed"
+    },
+    {
+      "name": "integration container cleanup fails immediately when the shared deadline has expired",
+      "status": "passed"
+    }
+  ]
+}

@@ -79,6 +79,52 @@ describe('SmsEventService', () => {
     expect(dedupe.release).not.toHaveBeenCalled();
   });
 
+  it('같은 대표 번호의 서로 다른 연수자 이벤트는 각각 발송하고 재전달은 억제한다', async () => {
+    const claimed = new Set<string>();
+    dedupe.claim.mockImplementation((eventId: string) => {
+      if (claimed.has(eventId)) return Promise.resolve('done');
+      claimed.add(eventId);
+      return Promise.resolve('claimed');
+    });
+    const first: SmsEvent = {
+      ...custom,
+      eventId: 'application-trainee-101',
+      phoneNumbers: ['01011112222'],
+      text: '연수자 101 신청 완료',
+    };
+    const second: SmsEvent = {
+      ...first,
+      eventId: 'application-trainee-102',
+      text: '연수자 102 신청 완료',
+    };
+
+    await service.handle(first);
+    await service.handle(second);
+    await service.handle(first);
+    await service.handle(second);
+
+    expect(sender.send).toHaveBeenCalledTimes(2);
+    expect(sender.send).toHaveBeenNthCalledWith(1, [
+      {
+        to: '01011112222',
+        from: config.sms.fromTraineeNumber,
+        text: first.text,
+      },
+    ]);
+    expect(sender.send).toHaveBeenNthCalledWith(2, [
+      {
+        to: '01011112222',
+        from: config.sms.fromTraineeNumber,
+        text: second.text,
+      },
+    ]);
+    expect(dedupe.complete.mock.calls).toEqual([
+      [first.eventId],
+      [second.eventId],
+    ]);
+    expect(dedupe.release).not.toHaveBeenCalled();
+  });
+
   it('claim 해제가 실패해도 원래 에러를 그대로 던진다', async () => {
     sender.send.mockRejectedValue(new Error('gateway down'));
     dedupe.release.mockRejectedValue(new Error('redis down'));

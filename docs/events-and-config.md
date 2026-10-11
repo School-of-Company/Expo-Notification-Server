@@ -2,7 +2,7 @@
 
 ## Kafka 이벤트
 
-공통: JSON, UTF-8. `eventId`는 멱등키다. 일반 문자/집계 이벤트의 `version`은 현재 `1`; User 등록/입장 이벤트에는 요구하지 않는다. 스키마가 틀린 메시지는 값 없이 검증 사유만 로그에 남기고 건너뛴다.
+공통: JSON, UTF-8. `eventId`(멱등키)는 필수. `version: 1`은 `notification.sms.requested`와 `expo.applicant-count.updated`에 필수이며, `user.participant.registered`와 `attention.entry.recorded`에는 요구하지 않는다. 스키마가 틀린 메시지는 값 없이 검증 사유만 로그에 남기고 건너뛴다.
 
 ### `user.participant.registered` — 등록 완료 (User 발행, QR 문자)
 
@@ -68,6 +68,48 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 | `CUSTOM` | `phoneNumbers[1..1000]`, `senderType`, `text` | 본문을 호출 측이 만든 일반/대량 문자 (연수 일정 안내 포함) |
 
 같은 `eventId`는 7일 동안 한 번만 발송한다(완료 마커 TTL. DLQ를 사람이 며칠 뒤 재처리해도 문자가 중복되지 않게). 그 이후 재전달되면 문자가 다시 나간다. 발송이 전부 실패하면 consumer가 던져 Kafka가 재전달하고, 일부 수신자만 실패하면 재전달하지 않는다(성공한 수신자 중복 발송 방지).
+
+#### 연수 신청 CUSTOM 수신 번호 (Notification #11)
+
+Expo producer가 User 연수자 응답에서 `notificationPhoneNumber`를 선택하여 기존
+`phoneNumbers` 배열에 넣는다. 기존 응답에서 해당 필드가 없거나 `null`일 때만
+`phoneNumber`로 fallback한다. 선택된 번호는 producer에서 하이픈/공백을 제거하고
+`^01\d{8,9}$` 형식을 검증한다. 값이 있는 잘못된 `notificationPhoneNumber`를 개인 번호로
+대체하지 않는다. 둘 다 없거나 선택한 번호가 유효하지 않으면 SMS 이벤트를 발행하지 않고
+producer에서 수신자 확인 실패로 기록/처리한다. Notification에는 빈 배열, `null`, 빈 문자열을
+보내지 않는다. 현재 consumer는 스키마 불일치 메시지를 건너뛰므로 이를 재시도 수단으로 쓰면 안 된다.
+
+Notification은 User 연락처를 조회하지 않는다. CUSTOM 계약에 `notificationPhoneNumber`,
+`traineeId` 등의 새 필드를 추가할 필요도 없다. 같은 대표 번호를 쓰는 서로 다른 연수자는
+producer가 서로 다른 `eventId`를 발급해야 한다. 동일 신청 작업의 재전달은 기존 `eventId`와
+payload를 유지한다. 번호만으로 사람이나 이벤트를 합치지 않는다. Notification의 멱등키는
+`sms:event:${eventId}`이며, 서로 다른 이벤트의 수신 번호가 같아도 각각 발송한다.
+24시간 완료 마커 만료 후 재전달은 다시 발송될 수 있다.
+
+확인한 upstream과 남은 의존성 (2026-10-11 조사 시점):
+
+- [User PR #82](https://github.com/School-of-Company/Expo-User-Server/pull/82),
+  head `3bae76c4fbd9395abf3202bbfd1f81ba612e211d`: 연수자 상세 응답은
+  `notificationPhoneNumber ?: phoneNumber`를 제공한다. 참가자 연결 생성은 본인 번호,
+  없으면 대표자 번호를 저장하며 `phoneNumber`는 `null`일 수 있다.
+- [Expo #44](https://github.com/School-of-Company/Expo-Expo-Server/issues/44)는 SMS를
+  후속 작업으로 설명하지만, 확인한 develop `cad63429eea3e969eeab4f60f9938e7e15a23358`에는
+  이미 producer가 있다.
+  [PublishTrainingSmsServiceImpl](https://github.com/School-of-Company/Expo-Expo-Server/blob/cad63429eea3e969eeab4f60f9938e7e15a23358/src/main/kotlin/team/startup/expo/domain/training/service/impl/PublishTrainingSmsServiceImpl.kt)은
+  `CUSTOM`, `TRAINEE`, 단일 수신자 배열을 발행하며 outbox payload를 재사용한다.
+  [TrainingApplicationSmsServiceImpl](https://github.com/School-of-Company/Expo-Expo-Server/blob/cad63429eea3e969eeab4f60f9938e7e15a23358/src/main/kotlin/team/startup/expo/domain/training/service/impl/TrainingApplicationSmsServiceImpl.kt)은
+  연수자 신청 작업마다 UUID를 생성하고 outbox는 그 operationId를 eventId로 저장한다.
+- **조사 시점의 blocker ([Expo #72](https://github.com/School-of-Company/Expo-Expo-Server/issues/72)로 후속 등록):**
+  [TrainingDependenciesClient.traineePhoneNumber](https://github.com/School-of-Company/Expo-Expo-Server/blob/cad63429eea3e969eeab4f60f9938e7e15a23358/src/main/kotlin/team/startup/expo/domain/training/service/TrainingDependenciesClient.kt)은
+  User 상세에서 아직 `phoneNumber`만 읽는다. 번호 없는 연결 연수자는 조회 검증에 실패하며
+  relay는 outbox를 재시도한다. Expo에서 위 선택/fallback/번호없음 계약을 구현하고 검증해야 한다.
+  SMS 활성화와 `contract-verified` 설정 및 실제 배포 상태는 별도 확인이 필요하다.
+
+Notification 범위는 기존 SmsEventService와 실제 SmsEventGuard를 사용하는 회귀 테스트로
+동일 대표 번호/서로 다른 eventId의 두 발송과 각 eventId 재전달 억제를 보장한다.
+Solapi와 Redis는 테스트 대역을 사용하므로 실제 발송이나 upstream 통합 검증은 포함하지 않는다.
+Redis 키, processing/done 상태 및 TTL 인자는 기존 `sms-stores.spec.ts`가 별도로 검증한다.
+실제 Redis의 TTL 만료 동작을 검증한 것은 아니다.
 
 **DLQ** (세 SMS 토픽 공통): 같은 이벤트 처리가 `sms.eventMaxAttempts`(기본 5)번 실패하면 원본 메시지를 `notification.sms.requested.dlq`로 옮기고(`x-source-topic` 헤더에 출처 토픽) 다음 메시지로 넘어간다.
 유효한 메시지는 처리 전에 현재 오프셋(다음 오프셋이 아님)을 커밋한다. 첫 메시지가 실패하여 consumer가 재시작되어도 `fromBeginning: false`가 최신 위치로 이동해 해당 메시지를 건너뛰지 않도록 한다. 성공 또는 DLQ 이동 후의 다음 오프셋 커밋은 KafkaJS가 수행한다.
@@ -141,3 +183,6 @@ env 이름 조회 키는 `USER_SERVICE_URL`, `USER_SERVICE_INTERNAL_TOKEN`이다
 
 config-server 쪽에서 해야 할 일: `configs/notification-{local,dev,prod}.yml` 추가, `docs/service-configs.md` 표와
 `src/config/configs-files.spec.ts`의 `SERVICES`에 `notification` 추가.
+
+TRAINEE CUSTOM의 실제 Kafka/Redis 통합 테스트, 7일 완료 마커, DLQ 재처리 및
+초기 group offset 준비 절차는 [연수 CUSTOM 운영 문서](trainee-custom-sms-operations.md)를 참고한다.
