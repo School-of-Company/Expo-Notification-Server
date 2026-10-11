@@ -48,7 +48,8 @@ $ pnpm run start:prod
 
 PRs targeting `develop` or `main` run `pr-title`, `lint`, and `verify` on
 opened, edited, synchronize, and reopened events. Titles may use the existing
-plain-language convention; only blank titles and control characters are rejected.
+plain-language convention without a `[scope]` prefix, with at most 50 characters
+and no emojis. Blank titles and control characters are also rejected.
 
 CI uses Node.js 22.23.3 and pnpm 11.10.0 (pinned in `package.json`), with a pnpm
 cache and frozen lockfile installation. Only `@swc/core` dependency builds are
