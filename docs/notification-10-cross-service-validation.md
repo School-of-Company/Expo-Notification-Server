@@ -8,7 +8,8 @@
 - Notification: `feat/admin-group-messaging`, 관리자 발송 작업·진행/실패 조회·공급자 어댑터.
 - Application: 별도 `origin/develop` 기반 Orca 작업공간에서 권한·전체 대상 조회와 Notification 호출 계약.
 - Client: 사용자 후속 지시에 따라 작업을 중단했다. 기존 소스 읽기만 허용되며 연결 완료로 주장하지 않는다.
-- Swagger #26: 별도 PR #30의 변경을 되돌리거나 복사하지 않는다. 병합 후 내부 경로 제외 정책을 함께 유지해야 한다.
+- Swagger #26: develop에 병합된 PR #30을 반영했다. 새 그룹 발송 내부 경로도 기본 문서에서 제외하고,
+  내부 문서 포함 시 토큰 인증과 403 응답을 표시한다.
 - 머지·배포·실제 유료 발송은 수행하지 않는다.
 
 ## 확인한 원천
@@ -51,7 +52,7 @@
 | --- | --- | --- |
 | Notification 실제 HTTP + Redis + 가짜 공급자 | 통과 | `notification-10-http-evidence.json` |
 | Notification 단위 테스트 | 239/239 통과 | `pnpm exec jest --runInBand` |
-| 기존 HTTP e2e | 30/30 통과 | `pnpm exec jest --config test/jest-e2e.json --runInBand` |
+| Swagger 병합 후 전체 HTTP e2e | 34/34 통과 | `pnpm test:e2e --runInBand` |
 | 새 그룹 발송 실제 Redis HTTP 통합 | 4/4 통과 | `pnpm exec jest --config test/integration/jest.json --runInBand admin-group-message` |
 | lint / 전체 타입 / build | 통과 | `pnpm lint:ci`, `pnpm exec tsc -p tsconfig.json --noEmit`, `pnpm build` |
 
@@ -60,3 +61,7 @@
 실패 suite만 분리해 재검증했으며 8/8 통과했다(135.266초). 테스트를 삭제하거나 약화하지 않았다.
 따라서 전체 실행 한 번이 모두 통과했다고 주장하지 않고, 나머지 통합 suite 통과와 CUSTOM 단독 재검증
 통과를 구분해 기록한다. PR 링크는 Orca 작업공간 코멘트에 기록한다.
+
+PR #31의 첫 CI에서는 Swagger 테스트의 내부 경로 2개 고정 검증이 새 경로 7개와 충돌했다.
+경로 목록을 실제 계약으로 확장하고 새 그룹 발송 컨트롤러의 인증·403 문서를 보완한 뒤
+전체 HTTP e2e 34/34와 lint·타입·build를 다시 통과했다.

@@ -12,6 +12,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { APP_CONFIG } from '../config/app-config.constants';
@@ -49,6 +50,9 @@ const jobIdSchema = z.string().regex(/^[a-f0-9]{64}$/);
 
 @Controller('internal/admin-group-messages')
 @UseGuards(AdminGroupMessageInternalGuard)
+@ApiTags('내부 관리자 그룹 발송')
+@ApiSecurity('internalToken')
+@ApiResponse({ status: 403, description: '내부 토큰 누락 또는 불일치' })
 export class AdminGroupMessageController {
   constructor(private readonly service: AdminGroupMessageService) {}
 

@@ -82,7 +82,19 @@ describe.each([
     const internal = Object.keys(document.paths).filter((path) =>
       path.startsWith('/internal/'),
     );
-    expect(internal.length).toBe(swagger.includeInternal ? 2 : 0);
+    expect(internal.sort()).toEqual(
+      swagger.includeInternal
+        ? [
+            '/internal/admin-group-messages/config',
+            '/internal/admin-group-messages/jobs/{jobId}',
+            '/internal/admin-group-messages/jobs/{jobId}/retries',
+            '/internal/admin-group-messages/previews',
+            '/internal/admin-group-messages/previews/{previewId}/jobs',
+            '/internal/promotion-notifications/{eventId}',
+            '/internal/promotion-notifications/{eventId}/reconciliation',
+          ]
+        : [],
+    );
     if (swagger.includeInternal) {
       expect(document.components?.securitySchemes?.internalToken).toEqual(
         expect.objectContaining({
