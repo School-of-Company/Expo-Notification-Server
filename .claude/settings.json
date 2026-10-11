@@ -50,6 +50,15 @@
             "command": "bash .claude/hooks/pre-tool-use.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/preToolUse.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -59,6 +68,15 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/post-tool-use.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/postToolUse.sh"
           }
         ]
       }
