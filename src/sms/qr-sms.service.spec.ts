@@ -163,6 +163,15 @@ describe('QrSmsService', () => {
     expect(publisher.publish).not.toHaveBeenCalled();
   });
 
+  it('HTTP 방식에서 끝낸 이벤트는 문자도 완료 이벤트도 다시 보내지 않는다', async () => {
+    dedupe.claim.mockResolvedValue('legacy-done');
+
+    await service.handle(standard);
+
+    expect(sender.send).not.toHaveBeenCalled();
+    expect(publisher.publish).not.toHaveBeenCalled();
+  });
+
   it('다른 곳에서 처리 중이면 버리지 않고 던진다. 문자도 발행도 하지 않는다 (문자가 아직 안 나갔을 수 있음)', async () => {
     dedupe.claim.mockResolvedValue('in-progress');
 

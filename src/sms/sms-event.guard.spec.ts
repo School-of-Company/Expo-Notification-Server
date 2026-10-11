@@ -40,6 +40,14 @@ describe('SmsEventGuard', () => {
     expect(work).not.toHaveBeenCalled();
   });
 
+  it('이전 HTTP 완료 이벤트는 작업 없이 legacy-done을 반환한다', async () => {
+    dedupe.claim.mockResolvedValue('legacy-done');
+    const work = jest.fn();
+
+    await expect(guard.once('e1', work)).resolves.toBe('legacy-done');
+    expect(work).not.toHaveBeenCalled();
+  });
+
   it('다른 곳에서 처리 중이면 조용히 버리지 않고 EventInProgressError를 던진다 (선점이 풀린 뒤 다시 받는다)', async () => {
     dedupe.claim.mockResolvedValue('in-progress');
     const work = jest.fn();
@@ -83,6 +91,27 @@ describe('SmsEventGuard', () => {
 
     await expect(guard.once('e1', jest.fn())).resolves.toBe('executed');
     expect(dedupe.complete).toHaveBeenCalledTimes(2);
+  });
+
+  it('완료 표시 재시도는 100ms와 200ms 간격을 두어 일시 장애 회복을 기다린다', async () => {
+    jest.useFakeTimers();
+    try {
+      dedupe.complete
+        .mockRejectedValueOnce(new Error('redis blip'))
+        .mockRejectedValueOnce(new Error('redis blip'))
+        .mockResolvedValueOnce(undefined);
+      const result = guard.once('e1', jest.fn());
+
+      await jest.advanceTimersByTimeAsync(0);
+      expect(dedupe.complete).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(100);
+      expect(dedupe.complete).toHaveBeenCalledTimes(2);
+      await jest.advanceTimersByTimeAsync(200);
+      await expect(result).resolves.toBe('executed');
+      expect(dedupe.complete).toHaveBeenCalledTimes(3);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('recordFailure는 실패 횟수를, clearFailures는 카운터 삭제를 위임한다', async () => {

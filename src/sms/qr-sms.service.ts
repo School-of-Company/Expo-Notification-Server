@@ -26,7 +26,7 @@ export class QrSmsService {
   async handle(event: ParticipantRegisteredEvent): Promise<void> {
     const standard = event.participationType === 'STANDARD';
 
-    await this.guard.once(event.eventId, async () => {
+    const result = await this.guard.once(event.eventId, async () => {
       const qrUrl = await this.attention.createQrImage({
         participationType: event.participationType,
         id: event.id,
@@ -53,7 +53,7 @@ export class QrSmsService {
     });
 
     // 문자가 이미 나간 이벤트(이번에 실행했거나 이전에 끝냄)만 여기까지 온다. 문자는 다시 보내지 않고 발행만 시도한다.
-    if (standard) {
+    if (standard && result !== 'legacy-done') {
       await this.publishSent(event);
     }
   }

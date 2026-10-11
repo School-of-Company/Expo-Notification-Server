@@ -1,4 +1,8 @@
-import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Logger,
+  OnModuleDestroy,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { Consumer, Kafka, KafkaMessage, Partitioners, Producer } from 'kafkajs';
 import { ZodType } from 'zod';
 import { parseKafkaJson } from '../common/kafka-json';
@@ -13,7 +17,7 @@ import { countsTowardDeadLetter } from './sms-errors';
  *   (발행 실패·처리 중 대기는 횟수에 세지 않는다 — sms-errors.ts)
  */
 export abstract class SmsKafkaConsumer<T extends { eventId: string }>
-  implements OnModuleInit, OnModuleDestroy
+  implements OnApplicationBootstrap, OnModuleDestroy
 {
   protected abstract readonly logger: Logger;
   protected abstract readonly schema: ZodType<T>;
@@ -35,12 +39,12 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
     });
   }
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.producer.connect();
     await this.consumer.connect();
     await this.consumer.subscribe({ topic: this.topic, fromBeginning: false });
     await this.consumer.run({
-      eachMessage: async ({ message }) => {
+      eachMessage: async ({ topic, partition, message }) => {
         const parsed = parseKafkaJson(message, this.schema);
         if (!parsed.ok) {
           this.logger.warn(
@@ -48,6 +52,10 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
           );
           return;
         }
+        // 첫 메시지 실패로 재시작해도 latest로 건너뛰지 않도록 현재 위치(다음 위치 아님)를 저장한다.
+        await this.consumer.commitOffsets([
+          { topic, partition, offset: message.offset },
+        ]);
         await this.process(parsed.value, message);
       },
     });
@@ -79,7 +87,16 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
           },
         ],
       });
-      await this.guard.clearFailures(event.eventId);
+      await this.guard
+        .clearFailures(event.eventId)
+        .catch((cleanupError: unknown) => {
+          this.logger.warn({
+            message: 'DLQ 전송 후 실패 카운터 정리 실패',
+            eventId: event.eventId,
+            error:
+              cleanupError instanceof Error ? cleanupError.message : undefined,
+          });
+        });
       this.logger.error(
         `이벤트를 DLQ로 이동: topic=${this.topic}, eventId=${event.eventId}, attempts=${attempts}`,
         error instanceof Error ? error.message : undefined,

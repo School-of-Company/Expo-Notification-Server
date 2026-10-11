@@ -8,7 +8,7 @@ const DONE_SECONDS = 60 * 60 * 24 * 7;
 const key = (eventId: string) => `sms:event:${eventId}`;
 const publishedKey = (eventId: string) => `sms:event-published:${eventId}`;
 
-export type ClaimResult = 'claimed' | 'in-progress' | 'done';
+export type ClaimResult = 'claimed' | 'in-progress' | 'done' | 'legacy-done';
 
 @Injectable()
 export class SmsEventDedupeStore {
@@ -29,7 +29,14 @@ export class SmsEventDedupeStore {
       }
       const state = await this.redis.get(key(eventId));
       if (state !== null) {
-        return state === 'done' ? 'done' : 'in-progress';
+        switch (state) {
+          case 'done':
+            return 'legacy-done';
+          case 'done-v2':
+            return 'done';
+          default:
+            return 'in-progress';
+        }
       }
     }
     return 'in-progress';
@@ -44,7 +51,7 @@ export class SmsEventDedupeStore {
   }
 
   async complete(eventId: string): Promise<void> {
-    await this.redis.set(key(eventId), 'done', 'EX', DONE_SECONDS);
+    await this.redis.set(key(eventId), 'done-v2', 'EX', DONE_SECONDS);
   }
 
   async increaseFailureCount(eventId: string): Promise<number> {

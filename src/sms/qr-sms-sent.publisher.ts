@@ -1,7 +1,7 @@
 import {
   Inject,
   Injectable,
-  OnModuleDestroy,
+  OnApplicationShutdown,
   OnModuleInit,
 } from '@nestjs/common';
 import { Kafka, Partitioners, Producer } from 'kafkajs';
@@ -19,7 +19,7 @@ export interface QrSmsSentEvent {
 
 /** QR 문자 발송 완료를 User 서비스에 알린다 (User가 eventId 멱등으로 문자 발송 횟수를 한 번만 올린다). */
 @Injectable()
-export class QrSmsSentPublisher implements OnModuleInit, OnModuleDestroy {
+export class QrSmsSentPublisher implements OnModuleInit, OnApplicationShutdown {
   private readonly producer: Producer;
 
   constructor(
@@ -35,7 +35,7 @@ export class QrSmsSentPublisher implements OnModuleInit, OnModuleDestroy {
     await this.producer.connect();
   }
 
-  async onModuleDestroy(): Promise<void> {
+  async onApplicationShutdown(): Promise<void> {
     await this.producer.disconnect();
   }
 

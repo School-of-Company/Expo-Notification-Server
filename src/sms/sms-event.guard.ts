@@ -9,7 +9,7 @@ import { EventInProgressError } from './sms-errors';
  * 다른 곳에서 처리 중이면 `EventInProgressError`를 던진다. 그냥 건너뛰면, 선점을 쥔 쪽이 죽었을 때
  * 오프셋만 커밋되어 이벤트가 사라진다. 던져서 선점이 풀린 뒤에 다시 받게 한다.
  */
-export type GuardResult = 'executed' | 'already-done';
+export type GuardResult = 'executed' | 'already-done' | 'legacy-done';
 
 @Injectable()
 export class SmsEventGuard {
@@ -19,12 +19,18 @@ export class SmsEventGuard {
 
   async once(eventId: string, work: () => Promise<void>): Promise<GuardResult> {
     const claim = await this.dedupe.claim(eventId);
-    if (claim === 'done') {
-      this.logger.log(`이미 처리한 이벤트라 무시: eventId=${eventId}`);
-      return 'already-done';
-    }
-    if (claim === 'in-progress') {
-      throw new EventInProgressError(`event ${eventId} is being processed`);
+    switch (claim) {
+      case 'done':
+        this.logger.log(`이미 처리한 이벤트라 무시: eventId=${eventId}`);
+        return 'already-done';
+      case 'legacy-done':
+        return 'legacy-done';
+      case 'in-progress':
+        throw new EventInProgressError(`event ${eventId} is being processed`);
+      case 'claimed':
+        break;
+      default:
+        throw new TypeError(String(claim satisfies never));
     }
 
     try {
@@ -54,6 +60,8 @@ export class SmsEventGuard {
             `완료 표시 실패 — 선점이 만료되면 재전달 시 문자가 중복될 수 있다: eventId=${eventId}`,
             error instanceof Error ? error.message : undefined,
           );
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
         }
       }
     }

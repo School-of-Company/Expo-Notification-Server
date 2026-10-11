@@ -43,7 +43,7 @@ describe('QrSmsSentPublisher', () => {
 
   it('기동 시 연결하고 종료 시 연결을 끊는다', async () => {
     await publisher.onModuleInit();
-    await publisher.onModuleDestroy();
+    await publisher.onApplicationShutdown();
 
     expect(producer.connect).toHaveBeenCalled();
     expect(producer.disconnect).toHaveBeenCalled();

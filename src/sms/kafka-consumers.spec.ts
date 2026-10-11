@@ -17,6 +17,7 @@ function fakeKafka() {
       eachMessage = options.eachMessage;
     }),
     disconnect: jest.fn(),
+    commitOffsets: jest.fn(),
   };
   const producer = {
     connect: jest.fn(),
@@ -47,7 +48,7 @@ const event = {
 };
 const guard = {
   recordFailure: jest.fn().mockResolvedValue(1),
-  clearFailures: jest.fn(),
+  clearFailures: jest.fn().mockResolvedValue(undefined),
 };
 
 describe('ParticipantRegisteredConsumer', () => {
@@ -59,7 +60,7 @@ describe('ParticipantRegisteredConsumer', () => {
       config,
       guard as unknown as SmsEventGuard,
       qrSms as unknown as QrSmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     expect(kafka.consumer).toHaveBeenCalledWith({
       groupId: 'expo-notification-server.sms.participant-registered',
@@ -85,7 +86,7 @@ describe('ParticipantRegisteredConsumer', () => {
       config,
       guard as unknown as SmsEventGuard,
       qrSms as unknown as QrSmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     await emit({ ...event, phoneNumber: 'bad' });
 
@@ -102,7 +103,7 @@ describe('EntryRecordedConsumer', () => {
       config,
       guard as unknown as SmsEventGuard,
       survey as unknown as SurveySmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     expect(kafka.consumer).toHaveBeenCalledWith({
       groupId: 'expo-notification-server.sms.entry-recorded',
@@ -127,14 +128,14 @@ describe('EntryRecordedConsumer', () => {
     };
     const exhausted = {
       recordFailure: jest.fn().mockResolvedValue(config.sms.eventMaxAttempts),
-      clearFailures: jest.fn(),
+      clearFailures: jest.fn().mockResolvedValue(undefined),
     };
     await new EntryRecordedConsumer(
       kafka as never,
       config,
       exhausted as unknown as SmsEventGuard,
       survey as unknown as SurveySmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     await expect(emit(event)).resolves.toBeUndefined();
 

@@ -67,6 +67,7 @@ describe('Notification server (e2e)', () => {
         disconnect: jest.fn(),
       }),
       consumer: ({ groupId }: { groupId: string }) => ({
+        commitOffsets: jest.fn(),
         connect: jest.fn(),
         subscribe: jest.fn(),
         run: jest.fn(({ eachMessage }: { eachMessage: EachMessageHandler }) => {

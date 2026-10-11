@@ -118,10 +118,19 @@ describe('SmsEventDedupeStore', () => {
 
   it('선점에 실패하면 완료 마커가 있으면 done, 아니면 in-progress', async () => {
     redis.set.mockResolvedValue(null);
-    redis.get.mockResolvedValueOnce('done').mockResolvedValueOnce('processing');
+    redis.get
+      .mockResolvedValueOnce('done-v2')
+      .mockResolvedValueOnce('processing');
 
     await expect(store.claim('e1')).resolves.toBe('done');
     await expect(store.claim('e1')).resolves.toBe('in-progress');
+  });
+
+  it('기존 HTTP 발송 완료 마커는 이벤트 발행 대상과 구분한다', async () => {
+    redis.set.mockResolvedValue(null);
+    redis.get.mockResolvedValue('done');
+
+    await expect(store.claim('e1')).resolves.toBe('legacy-done');
   });
 
   it('발행 여부는 별도 키(sms:event-published)로 기록하고 조회한다', async () => {
@@ -165,7 +174,7 @@ describe('SmsEventDedupeStore', () => {
 
     expect(redis.set).toHaveBeenCalledWith(
       'sms:event:e1',
-      'done',
+      'done-v2',
       'EX',
       604800,
     );
