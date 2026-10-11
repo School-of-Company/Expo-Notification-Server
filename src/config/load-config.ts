@@ -43,6 +43,10 @@ function eurekaFromEnv(env: Env): Record<string, unknown> {
 function configFromEnv(env: Env): Record<string, unknown> {
   return {
     ...pickDefined({ port: env.PORT }),
+    swagger: pickDefined({
+      enabled: env.SWAGGER_ENABLED,
+      includeInternal: env.SWAGGER_INCLUDE_INTERNAL,
+    }),
     kafka: pickDefined({
       brokers: env.KAFKA_BROKERS,
       clientId: env.KAFKA_CLIENT_ID,
@@ -53,7 +57,6 @@ function configFromEnv(env: Env): Record<string, unknown> {
         smsDeadLetter: env.KAFKA_SMS_DEAD_LETTER_TOPIC,
         qrSmsSent: env.KAFKA_QR_SMS_SENT_TOPIC,
         participantRegistered: env.KAFKA_PARTICIPANT_REGISTERED_TOPIC,
-        entryRecorded: env.KAFKA_ENTRY_RECORDED_TOPIC,
         expoApplicantCount: env.KAFKA_EXPO_APPLICANT_COUNT_TOPIC,
       }),
     }),
@@ -74,14 +77,42 @@ function configFromEnv(env: Env): Record<string, unknown> {
       expoName: env.SMS_EXPO_NAME,
       contactStandardNumber: env.SMS_CONTACT_STANDARD_NUMBER,
       contactTraineeNumber: env.SMS_CONTACT_TRAINEE_NUMBER,
-      surveyUrlTemplate: env.SMS_SURVEY_URL_TEMPLATE,
+      qrUrlTemplate: env.SMS_QR_URL_TEMPLATE,
+      traineeQrUrlTemplate: env.SMS_TRAINEE_QR_URL_TEMPLATE,
       authMaxVerifyAttemptCount: env.SMS_AUTH_MAX_VERIFY_ATTEMPT_COUNT,
     }),
-    attention: pickDefined({
-      baseUrl: env.ATTENTION_SERVICE_URL,
-      internalToken: env.ATTENTION_SERVICE_INTERNAL_TOKEN,
+    ...((env.USER_SERVICE_URL || env.USER_SERVICE_INTERNAL_TOKEN) && {
+      user: pickDefined({
+        baseUrl: env.USER_SERVICE_URL,
+        internalToken: env.USER_SERVICE_INTERNAL_TOKEN,
+      }),
     }),
     ...eurekaFromEnv(env),
+    ...((env.PROMOTION_APPLICATION_URL || env.PROMOTION_ENABLED) && {
+      promotion: {
+        ...pickDefined({
+          enabled: env.PROMOTION_ENABLED,
+          internalToken: env.PROMOTION_INTERNAL_TOKEN,
+          topic: env.KAFKA_PROMOTION_TOPIC,
+          groupId: env.KAFKA_PROMOTION_GROUP_ID,
+        }),
+        application: pickDefined({
+          baseUrl: env.PROMOTION_APPLICATION_URL,
+          internalToken: env.PROMOTION_APPLICATION_INTERNAL_TOKEN,
+        }),
+      },
+    }),
+    ...((env.ADMIN_GROUP_MESSAGING_ENABLED ||
+      env.ADMIN_GROUP_MESSAGING_INTERNAL_TOKEN) && {
+      adminGroupMessaging: pickDefined({
+        enabled: env.ADMIN_GROUP_MESSAGING_ENABLED,
+        internalToken: env.ADMIN_GROUP_MESSAGING_INTERNAL_TOKEN,
+        previewTtlSeconds: env.ADMIN_GROUP_MESSAGING_PREVIEW_TTL_SECONDS,
+        authorizationTtlSeconds:
+          env.ADMIN_GROUP_MESSAGING_AUTHORIZATION_TTL_SECONDS,
+        retentionSeconds: env.ADMIN_GROUP_MESSAGING_RETENTION_SECONDS,
+      }),
+    }),
     discord: pickDefined({
       participantNumberUrl: env.DISCORD_PARTICIPANT_NUMBER_URL,
     }),

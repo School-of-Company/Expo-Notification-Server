@@ -25,22 +25,17 @@ export function renderSms(event: SmsEvent): RenderedSms {
 
 export function renderQrSms(params: {
   expoName: string;
-  qrUrl: string;
+  links: readonly { readonly label: string; readonly url: string }[];
   contactNumber?: string;
 }): string {
   const lines = [
-    `${params.expoName} 현장 등록이 완료되었습니다.`,
-    `출입 QR코드 링크: ${params.qrUrl}`,
+    `${params.expoName} 등록이 완료되었습니다.`,
+    '입장할 때 아래 QR 링크를 입구에서 보여 주세요.',
+    '',
+    ...params.links.map(({ label, url }) => `${label}: ${url}`),
   ];
   if (params.contactNumber) {
     lines.push(`(문의) ☎${params.contactNumber}`);
   }
   return lines.join('\n');
-}
-
-export function renderSurveySms(params: {
-  expoName: string;
-  surveyUrl: string;
-}): string {
-  return `${params.expoName} 설문조사\n${params.expoName}을 방문해주셔서 감사합니다. 체험 후 꼭 설문에 응답해주세요.\n${params.surveyUrl}`;
 }

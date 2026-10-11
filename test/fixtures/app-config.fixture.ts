@@ -3,6 +3,7 @@ import { AppConfig } from '../../src/config/app-config';
 export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 3000,
+    swagger: { enabled: false, includeInternal: false },
     kafka: {
       brokers: ['localhost:9092'],
       clientId: 'expo-notification-server',
@@ -13,7 +14,6 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         smsDeadLetter: 'notification.sms.requested.dlq',
         qrSmsSent: 'notification.qr-sms.sent',
         participantRegistered: 'user.participant.registered',
-        entryRecorded: 'attention.entry.recorded',
         expoApplicantCount: 'expo.applicant-count.updated',
       },
     },
@@ -30,11 +30,14 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       expoName: '광주 박람회',
       contactStandardNumber: '062-380-4504',
       contactTraineeNumber: '062-380-4587',
-      surveyUrlTemplate: 'https://survey.test/expo/{expoId}',
+      qrUrlTemplate:
+        'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
+      traineeQrUrlTemplate:
+        'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}',
       authMaxVerifyAttemptCount: 5,
     },
-    attention: {
-      baseUrl: 'http://attention.test',
+    user: {
+      baseUrl: 'http://user.test',
       internalToken: 'a'.repeat(32),
     },
     discord: { participantNumberUrl: 'https://discord.test/webhook' },

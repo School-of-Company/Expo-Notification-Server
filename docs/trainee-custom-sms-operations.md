@@ -2,7 +2,7 @@
 
 ## 검증 범위와 기반
 
-이 테스트 브랜치는 `test/trainee-custom-sms-integration`이다. develop
+초기 검증의 테스트 브랜치는 `test/trainee-custom-sms-integration`이었다. develop
 `1b2a5980b9ce50c39a7bebf56eaedca0a1fc79f0`에서 시작하고, 명시적 선행 기반으로
 `origin/feat/qr-sms-sent-event` / PR #7의
 `11bee4d72ccbbe663556052baa599c29a08a6c4c`를 fast-forward했다.
@@ -86,6 +86,13 @@ Expo의 Kafka ACK는 broker 수락이며 Notification 처리 완료나 SMS 전�
 7일이며 실패마다 연장하지 않는다. develop 조사 SHA의 완료 TTL은 24시간이었다.
 실제 배포 SHA 및 Redis 상태가 어느 정책인지 배포 전에 확인해야 한다.
 
+위의 `done`과 24시간 TTL은 해당 SHA의 역사 기록이다. 현재 소스의 완료 마커는
+`sms:event:<eventId>=done-v2`이며 완료 시점부터 604800초(7일) 보존한다.
+기존 HTTP 방식의 `done`은 `legacy-done`으로 구분하여 문자와 QR 완료 발행을 모두
+건너뛴다. `done-v2`는 이미 보낸 문자를 다시 보내지 않고 STANDARD의 미완료 QR
+완료 발행을 이어갈 수 있다. CUSTOM은 QR 완료 발행을 하지 않는다.
+현재 소스 확인과 운영 배포 확인은 별개다.
+
 전부 실패한 발송은 선점을 해제하고 실패 횟수를 증가시킨다. 상한에 도달하면
 key/value 원본과 `x-source-topic`을 DLQ로 옮긴 뒤 실패 카운터를 지운다.
 같은 ID/JSON으로 요청 topic에 복구하면 새 실패 예산으로 처리된다.
@@ -99,12 +106,13 @@ lease 동안 기다리지만 lease 만료 후 다시 발송할 수 있다. 완�
 만료, Redis 데이터 유실/교체, 오래된 DLQ replay도 중복 가능성을 남긴다.
 정확히 한 번의 SMS 발송을 보장하지 않는다.
 
-**합의 상태: 미확인.** Expo 담당자와 DLQ 재처리 허용 기간을 합의한 기록은 없다.
-운영 절차 제안은 최초 완료로부터 7일 미만이며, 실제 처리 지연/장애 여유를 빼고
-더 짧은 기간을 담당자와 확정해야 한다. DLQ 보관 기간 자체가 안전한 재처리 기간은 아니다.
-기간을 넘긴 replay는 자동으로 진행하지 말고 발송 이력과 중복 영향을 담당자가 판단한다.
+**합의 상태: 2026-10-12 Expo 담당자 승인.** 완료 마커 보존 기간은 완료 시점부터 7일이다.
+DLQ 수동 재처리는 최초 Notification 처리 시도부터 7일 미만에만 허용하며,
+원본 `eventId`와 JSON을 유지한다. 최초 처리 시각을 확인할 수 없는 건은 자동 재처리하지 않는다.
+DLQ 보관 기간 자체가 안전한 재처리 기간은 아니다.
+7일 이상 지난 replay는 발송 이력과 중복 영향을 담당자가 확인한 뒤 수동 판단한다.
 기간 변경 시 Expo의 replay 정책과 Notification 실제 배포 TTL을 함께 확인한다.
-이 문서는 합의 또는 배포 승인을 대신하지 않는다.
+이 합의는 실제 배포 완료나 Redis 장애에서 중복 없는 발송을 보장하지 않는다.
 
 ## 준비 및 배포 순서
 
@@ -126,8 +134,17 @@ lease 동안 기다리지만 lease 만료 후 다시 발송할 수 있다. 완�
    재시작은 동일 group으로 진행한다. 검증에서는 committed offset 이후의 offline 메시지를
    처리하고 이전 완료 ID replay는 Redis로 억제했다.
 
-운영 배포 여부, 상대 서비스 준비 여부, 시작 offset 정책 및 보존 기간 합의는 모두
-외부 확인 사항으로 남아 있다. Application 외부 성공 직후 Expo 프로세스 중단이나
+배포 순서는 Notification consumer의 구독 및 offset 준비를 확인한 뒤 Expo 발행 기능을
+활성화하는 것으로 합의했다. 기존 group과 committed offset을 유지하며, offset이 없는
+group의 사전 발행 메시지는 별도 복구 대상으로 판단한다. 기존 메시지를 무조건 earliest로
+재생하지 않는다. 실제 배포 SHA와 consumer 준비 상태는 아직 확인되지 않았다.
+2026-10-12 저장소 확인에서 `deploy.yml`은 `develop`에만 있고 기본 브랜치 `main`에는
+없었다. 기존 `gh run list --workflow deploy.yml`의 404는 배포 성공/실패의 증거가 아니다.
+실제 배포 SHA, 배포된 7일 TTL 및 consumer 구독/offset 준비 증거를 담당자가 확인하기
+전에는 운영 조건 완료를 선언하거나 #27을 닫지 않는다. #8은 개발 완료로 닫혔으며,
+남은 운영 확인은 #27에서 관리한다. 읽기 전용 조사 결과와 DevOps 확인 명령은
+[Notification #27 운영 확인 runbook](notification-27-deployment-check.md)에 기록한다.
+Application 외부 성공 직후 Expo 프로세스 중단이나
 HTTP 응답 유실의 성공 여부 확인은 Notification 책임이 아니며 outbox만으로 해결했다고 설명하지 않는다.
 
 ## 실패 조사와 개인정보
@@ -140,7 +157,8 @@ DLQ key/value에는 전화번호와 본문이 있으므로 일반 로그, Orca c
 stdout에는 식별자/건수만 출력해야 한다.
 
 `이벤트를 DLQ로 이동`, `완료 표시 실패`, consumer restart/lag, Redis 가용성/TTL을
-함께 확인한다. processing 상태를 done으로 임의 변경하거나 key를 삭제하면
+함께 확인한다. processing 상태를 완료 마커로 임의 변경하거나 key를 삭제하면
 중복/유실 판단을 바꾸므로 발송 이력 확인 없이 운영 복구 명령을 실행하지 않는다.
 검증에서 운영 resource 변경, 유료 문자, 운영 배포 및 이슈 수정은 실행하지 않았다.
-검증 이후 별도로 요청된 PR 생성은 운영 배포나 담당자 합의 완료를 의미하지 않는다.
+2026-10-12 사용자(Expo 담당자) 합의는 위 운영 정책에 한정한다. 별도로 요청된
+문서 PR과 이슈 댓글은 운영 배포 또는 consumer 준비 완료의 증거가 아니다.

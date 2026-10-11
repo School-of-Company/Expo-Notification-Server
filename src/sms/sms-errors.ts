@@ -11,6 +11,8 @@ export class SentEventPublishError extends RetryableWithoutDeadLetterError {}
 
 export class EventInProgressError extends RetryableWithoutDeadLetterError {}
 
+export class QrLinkError extends Error {}
+
 export function countsTowardDeadLetter(error: unknown): boolean {
   return (
     (error as { countsTowardDeadLetter?: boolean } | null)

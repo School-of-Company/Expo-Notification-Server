@@ -1,8 +1,4 @@
-import {
-  renderQrSms,
-  renderSms,
-  renderSurveySms,
-} from './sms-message.templates';
+import { renderQrSms, renderSms } from './sms-message.templates';
 
 const base = { eventId: 'e1', version: 1 as const };
 
@@ -41,29 +37,20 @@ describe('renderQrSms', () => {
     expect(
       renderQrSms({
         expoName: '광주 박람회',
-        qrUrl: 'https://s3.example/qr.jpg',
+        links: [{ label: '대표자', url: 'https://expo.test/qr' }],
         contactNumber: '062-380-4504',
       }),
     ).toBe(
-      '광주 박람회 현장 등록이 완료되었습니다.\n출입 QR코드 링크: https://s3.example/qr.jpg\n(문의) ☎062-380-4504',
+      '광주 박람회 등록이 완료되었습니다.\n입장할 때 아래 QR 링크를 입구에서 보여 주세요.\n\n대표자: https://expo.test/qr\n(문의) ☎062-380-4504',
     );
   });
 
   it('문의 번호가 없으면 문의 줄을 뺀다', () => {
     expect(
-      renderQrSms({ expoName: '박람회', qrUrl: 'https://s3.example/qr.jpg' }),
+      renderQrSms({
+        expoName: '박람회',
+        links: [{ label: '대표자', url: 'https://expo.test/qr' }],
+      }),
     ).not.toContain('문의');
-  });
-});
-
-describe('renderSurveySms', () => {
-  it('행사명과 설문 링크를 담는다', () => {
-    const text = renderSurveySms({
-      expoName: '광주 박람회',
-      surveyUrl: 'https://survey.example/1',
-    });
-
-    expect(text).toContain('광주 박람회 설문조사');
-    expect(text).toContain('https://survey.example/1');
   });
 });

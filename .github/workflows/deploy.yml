@@ -1,0 +1,67 @@
+name: Deploy
+
+# main 에 머지되면 배포한다 (glink.kr ~/expo, 개발/운영 구분 없는 단일 환경)
+# 서버 설정은 Config Server 가 아니라 서버의 app/notification/.env 와 ecosystem 에서 받는다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-notification-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    env:
+      SVC: notification
+      DEPLOY_ENV: prod # 서버는 단일 환경이라 무시한다 (deploy.sh 인자 호환용)
+      REMOTE_ROOT: /srv/users/projects/2026/team1/expo
+    steps:
+      - uses: actions/checkout@v4
+
+      # package.json 의 packageManager(pnpm 버전)를 따른다. version 입력을 같이 주면 충돌 오류가 난다.
+      - uses: pnpm/action-setup@v4
+
+      # 서버는 Node 26 으로 실행한다
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # 단위 테스트만 돌린다 (e2e·통합 테스트는 Kafka·Redis 가 필요). 실패하면 업로드 전에 멈춘다.
+      - name: Test
+        run: pnpm run test
+
+      - name: Build
+        run: |
+          pnpm run build
+          pnpm prune --prod
+
+      - name: Package
+        run: tar czf release.tar.gz dist node_modules package.json
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.EXPO_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.EXPO_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload and deploy
+        env:
+          HOST: ${{ vars.EXPO_SSH_HOST }}
+          PORT: ${{ vars.EXPO_SSH_PORT }}
+          USER: ${{ vars.EXPO_SSH_USER }}
+        run: |
+          REL="${GITHUB_SHA::12}-${GITHUB_RUN_ATTEMPT}"
+          scp -P "$PORT" release.tar.gz "$USER@$HOST:$REMOTE_ROOT/app/$SVC/incoming/$REL.tar.gz"
+          ssh -p "$PORT" "$USER@$HOST" "$REMOTE_ROOT/bin/deploy.sh $SVC $DEPLOY_ENV $REL"

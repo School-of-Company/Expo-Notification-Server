@@ -131,3 +131,14 @@ Node 22에서 단위 172개, HTTP e2e 22개, 실제 격리 Kafka/Redis 통합 10
 ESLint, 전체 타입 검사, 빌드와 diff 검사를 통과했다. 생성한 통합 컨테이너는
 테스트 teardown으로 정리되었다. 운영 합의, 배포 SHA 및 실제 유료 발송은
 여전히 확인하지 않았으므로 #8의 운영 완료 조건은 남아 있다.
+
+## 운영 정책 합의 갱신 (2026-10-12)
+
+위의 합의 미확인 문구와 초기 `done` 마커 기록은 각 검증 시점의 역사 기록이다.
+현재 계약은 `done-v2`, 완료 시점부터 7일 TTL이며 기존 `done`은 `legacy-done`으로
+구분한다. 사용자(Expo 담당자)는 최초 Notification 처리 시도부터 7일 미만의 DLQ
+수동 재처리에서 동일 `eventId`/JSON 유지, 오래된 건의 수동 판단, Notification
+구독/offset 준비 후 Expo 활성화 순서에 합의했다.
+상세 정책은 [운영 문서](trainee-custom-sms-operations.md)에 기록했다.
+실제 배포 SHA와 배포된 TTL, 운영 consumer 구독/offset 준비는 아직 증거가 없다.
+이 정책 합의와 과거 로컬 테스트 통과만으로 #8을 완료 처리하지 않는다.

@@ -14,8 +14,41 @@ const serviceClient = z.object({
   internalToken: z.string().min(32),
 });
 
+const kakaoVariableMapping = z
+  .object({
+    name: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
+    programName: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
+    sessionName: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
+    location: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
+  })
+  .strict();
+
 export const appConfigSchema = z.object({
   port: z.coerce.number().int().positive().default(3000),
+  swagger: z
+    .object({
+      enabled: z
+        .stringbool({ truthy: ['true'], falsy: ['false'] })
+        .or(z.boolean())
+        .default(false),
+      includeInternal: z
+        .stringbool({ truthy: ['true'], falsy: ['false'] })
+        .or(z.boolean())
+        .default(false),
+    })
+    .prefault({}),
   kafka: z.object({
     brokers,
     clientId: z.string().min(1).default('expo-notification-server'),
@@ -29,7 +62,6 @@ export const appConfigSchema = z.object({
           .string()
           .min(1)
           .default('user.participant.registered'),
-        entryRecorded: z.string().min(1).default('attention.entry.recorded'),
         smsDeadLetter: z
           .string()
           .min(1)
@@ -55,13 +87,113 @@ export const appConfigSchema = z.object({
     authMaxSendCount: z.coerce.number().int().positive().default(5),
     authMaxSendCountPerHour: z.coerce.number().int().positive().default(300),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),
-    expoName: z.string().min(1).default('박람회'),
+    expoName: z.string().min(1).default('AI 미래교육 페스타'),
     contactStandardNumber: z.string().min(1).optional(),
     contactTraineeNumber: z.string().min(1).optional(),
-    surveyUrlTemplate: z.string().min(1).optional(),
+    qrUrlTemplate: z.string().trim().optional(),
+    traineeQrUrlTemplate: z.string().trim().optional(),
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
   }),
-  attention: serviceClient,
+  user: serviceClient.optional(),
+  promotion: z
+    .object({
+      enabled: z
+        .union([
+          z.boolean(),
+          z.enum(['true', 'false']).transform((value) => value === 'true'),
+        ])
+        .default(false),
+      application: serviceClient,
+      internalToken: z.string().min(32),
+      topic: z.string().min(1).default('application.program-session.promoted'),
+      groupId: z.string().min(1).default('expo-notification-server.promotion'),
+    })
+    .optional(),
+  adminGroupMessaging: z
+    .object({
+      enabled: z
+        .union([
+          z.boolean(),
+          z.enum(['true', 'false']).transform((value) => value === 'true'),
+        ])
+        .default(false),
+      internalToken: z.string().min(32),
+      previewTtlSeconds: z.coerce.number().int().positive().default(1800),
+      authorizationTtlSeconds: z.coerce.number().int().positive().default(300),
+      retentionSeconds: z.coerce.number().int().positive().default(2592000),
+      kakao: z
+        .object({
+          enabled: z
+            .union([
+              z.boolean(),
+              z.enum(['true', 'false']).transform((value) => value === 'true'),
+            ])
+            .default(false),
+          pfId: z.string().min(1),
+          templates: z.array(
+            z
+              .object({
+                id: z.string().min(1).max(100),
+                name: z.string().min(1).max(100),
+                providerTemplateId: z.string().min(1),
+                content: z
+                  .string()
+                  .min(1)
+                  .refine((content) => Array.from(content).length <= 1000, {
+                    message: 'approved Kakao content exceeds 1000 characters',
+                  }),
+                variableMapping: kakaoVariableMapping,
+              })
+              .superRefine((template, context) => {
+                const mapped = Object.values(template.variableMapping);
+                const placeholders = [
+                  ...template.content.matchAll(/#\{[^{}]+\}/g),
+                ].map((match) => match[0]);
+                if (
+                  new Set(mapped).size !== mapped.length ||
+                  placeholders.some(
+                    (placeholder) => !mapped.includes(placeholder),
+                  ) ||
+                  mapped.some(
+                    (placeholder) => !placeholders.includes(placeholder),
+                  )
+                )
+                  context.addIssue({
+                    code: 'custom',
+                    path: ['variableMapping'],
+                    message:
+                      'mapping must exactly cover unique approved content placeholders',
+                  });
+              }),
+          ),
+        })
+        .superRefine((kakao, context) => {
+          if (kakao.enabled && kakao.templates.length === 0)
+            context.addIssue({
+              code: 'custom',
+              path: ['templates'],
+              message:
+                'at least one approved template is required when Kakao is enabled',
+            });
+          const ids = kakao.templates.map((template) => template.id);
+          if (new Set(ids).size !== ids.length)
+            context.addIssue({
+              code: 'custom',
+              path: ['templates'],
+              message: 'template ids must be unique',
+            });
+        })
+        .optional(),
+    })
+    .superRefine((settings, context) => {
+      if (settings.retentionSeconds < settings.previewTtlSeconds)
+        context.addIssue({
+          code: 'custom',
+          path: ['retentionSeconds'],
+          message: 'job retention must not be shorter than preview retention',
+        });
+    })
+    .optional(),
   eureka: z
     .object({
       serviceUrl: z.union([z.string().min(1), z.array(z.string().min(1))]),

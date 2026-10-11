@@ -8,6 +8,8 @@ import { EurekaClientModule } from './eureka/eureka-client.module';
 import { KafkaModule } from './kafka/kafka.module';
 import { RedisModule } from './redis/redis.module';
 import { SmsModule } from './sms/sms.module';
+import { PromotionModule } from './promotion/promotion.module';
+import { AdminGroupMessageModule } from './admin-group-message/admin-group-message.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { SmsModule } from './sms/sms.module';
     KafkaModule,
     RedisModule,
     SmsModule,
+    PromotionModule,
+    AdminGroupMessageModule,
     AlarmModule,
   ],
   controllers: [AppController],

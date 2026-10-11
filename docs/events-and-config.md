@@ -2,21 +2,40 @@
 
 ## Kafka 이벤트
 
-공통: JSON, UTF-8. `eventId`(멱등키)는 필수. `version: 1`은 `notification.sms.requested`와 `expo.applicant-count.updated`에 필수이며, `user.participant.registered`와 `attention.entry.recorded`에는 요구하지 않는다. 스키마가 틀린 메시지는 로그만 남기고 건너뛴다.
+공통: JSON, UTF-8. `eventId`(멱등키)는 필수. `version: 1`은 `notification.sms.requested`와 `expo.applicant-count.updated`에 필수이며, `user.participant.registered`에는 요구하지 않는다. 스키마가 틀린 메시지는 값 없이 검증 사유만 로그에 남기고 건너뛴다.
 
 ### `user.participant.registered` — 등록 완료 (User 발행, QR 문자)
 
 ```json
-{ "eventId": "…", "expoId": "…", "participationType": "STANDARD", "id": 42, "phoneNumber": "010-1234-5678" }
+{ "eventId": "…", "expoId": "…", "participationType": "STANDARD", "id": 42, "phoneNumber": "010-1234-5678", "representativeId": 42, "participants": [{ "id": 42, "code": "abcdefghijklmnopqrstuv" }, { "id": 43, "code": "ABCDEFGHIJKLMNOPQRSTUV" }] }
 ```
 
 User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드민 재발송 포함), 연수 FIELD 신규 등록 때 아웃박스로 발행한다 (연수 PRE는 발행하지 않음).
 전화번호는 하이픈이 있어도 받고 숫자만 남겨 정규화한다. 처리 순서:
 
 1. `eventId` 선점 (이미 끝낸 이벤트면 문자는 건너뛰고 발행만 이어서 시도. 다른 곳에서 처리 중이면 버리지 않고 던져서, 선점이 풀린 뒤 다시 받는다)
-2. Attention `POST /internal/qr-images`로 QR 이미지 URL을 받는다 (`X-Internal-Token`)
-3. 일반/연수 발신번호로 QR 문자 발송 (문의 번호는 `sms.contactStandardNumber`/`contactTraineeNumber`)
+2. 이벤트 목록만큼 프론트 `/qr` 링크를 만들고, STANDARD는 User `POST /internal/standard-participants/names`로 이름을 한 번 조회한다 (`X-Internal-Token`)
+3. 대표자 번호로 줄바꿈한 링크들을 한 통 발송한다 (일반/연수 발신번호와 문의 번호는 기존 설정 사용)
 4. 완료 마커로 승격하고, **일반 참가자만** `notification.qr-sms.sent` 이벤트를 발행
+
+`participants`는 이번 문자 대상(1~5명)이다. 새 동행자 추가는 새 동행자만, 재발송은 기존 전체다. 대표자는 `representativeId ?? id`로 판별하고 존재할 때만 먼저 표시한다. 나머지는 이벤트 순서를 유지하며 목록에 없는 대표자를 추가하지 않는다. 완료 이벤트의 `id`도 `representativeId ?? id`다.
+
+이름은 이벤트에서 읽지 않는다. 이름 조회 요청은 `{expoId, participantIds}`, 응답은 요청 순서대로 `[{participantId,name}]`다. 이름이 있으면 `이름(대표자): 링크` / `이름: 링크`, 없으면 `대표자: 링크` / `동행자 1: 링크`를 사용한다. 이름 API 미설정, 404/401/5xx, 연결/JSON 실패, 잘못된 ID/순서/이름 응답은 전체 이름을 역할 라벨로 대체하고 발송을 계속한다. 선택 조회가 발송을 오래 막지 않게 공통 HTTP 기본 10초 대신 2초 timeout을 적용한다. 이름/전화번호/code/완성 링크나 원문 응답/오류는 QR 처리 로그에 남기지 않는다.
+
+### QR 링크 설정과 미발송 정책
+
+- STANDARD: `sms.qrUrlTemplate` / `SMS_QR_URL_TEMPLATE`
+  `https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&code={code}`
+- TRAINEE FIELD: `sms.traineeQrUrlTemplate` / `SMS_TRAINEE_QR_URL_TEMPLATE`
+  `https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}`
+- 두 형식은 다르므로 연수자에 STANDARD 템플릿을 대신 사용하지 않는다. 연수자는 Client의 기존 `{traineeId,phoneNumber}` QR를 유지하며 전화번호가 URL에 남는다. 일행 페이지/token 발급이나 일반 code 생성은 하지 않는다.
+- 치환 값은 URI 인코딩한다. HTTPS, 정확한 `/qr` 경로와 쿼리 이름/값/개수, 필수 placeholder를 검증한다. ID는 positive safe integer, STANDARD code는 영문·숫자·`_`·`-` 22자다. 자격증명/fragment/추가 쿼리를 허용하지 않는다.
+- 해당 유형의 템플릿이 없거나 비어 있으면 **선점·발송·완료 표시·완료 이벤트 발행을 모두 하지 않는다**. Kafka 처리는 정상 종료되므로 활성화 뒤 자동 재전달되지 않는다. 운영자는 필요한 이벤트를 선별해 재생해야 한다.
+- 비어 있지 않은 잘못된 템플릿, STANDARD의 누락된 participants/code, 한 통 길이 상한 초과는 발송 없이 실패하며 선점을 해제한다. 기존 최대 재시도 후 DLQ 정책을 사용한다. 성공을 거짓 기록하지 않는다.
+- code 형식 오류/중복 ID/빈 목록/6명 이상/잘못된 ID 등 스키마 오류는 기존 소비 정책대로 로그 후 건너뛰며 미발송한다. 원본을 복구하려면 운영 원본 이벤트 보관이 필요하다.
+- 구버전 STANDARD 이벤트에 code/목록이 없으면 번호로 QR를 생성하거나 code를 추측하지 않는다. 현재 User resolve API는 ID만 반환하고 names API도 code를 반환하지 않는다. User에서 현재 저장된 QR로 새 등록/재발송 이벤트를 생산하거나, 원본 outbox 목록이 있는 경우 공급자가 복구한 이벤트를 재생해야 한다. 구버전의 `done-v2`는 이미 발송한 문자이므로 완료 발행만 이어가고 `done`은 모두 건너뛴다.
+
+[Solapi 공식 발송 계약](https://solapi.com/developers/api/messages)에 따르면 `autoTypeDetect` 기본값은 true이고 type 생략 시 90바이트 초과는 LMS(2,000바이트 상한)로 전환된다. 설치 SDK 6.0.1의 `send`는 타입을 생략한 메시지를 `messages/v4/send-many/detail`에 그대로 전달한다. QR 본문의 UTF-8 크기를 보수적으로 2,000바이트 이하로 제한하며 초과 시 나누어 보내지 않는다. 한글은 통신사 기준 2바이트지만 UTF-8에서는 3바이트여서 실제 LMS에 들어갈 일부 긴 본문도 미발송될 수 있다. 운영 Client 도메인/행사명/문의번호를 반영한 5명 본문으로 최종 길이를 확인해야 한다.
 
 ### `notification.qr-sms.sent` — QR 문자 발송 완료 (알림 서버 발행, User 소비)
 
@@ -33,11 +52,10 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 - 전환 전 HTTP 방식의 Redis `sms:event:{eventId}=done`은 문자와 완료 이벤트를 모두 건너뛴다. 새 완료 마커는 `done-v2`로 저장해 발행 대기 상태와 구분한다. 기존 HTTP 호출 실패 여부는 마커에 없어 과거 미집계 이벤트를 자동 복구하지 않으며, 기존 마커 만료 이후의 재전달은 구분할 수 없다. 구버전 소비자를 종료하고 처리 중 메시지를 정리한 뒤 전환한다.
 - 완료 이벤트 producer는 모듈 초기화에서 연결하고, SMS 소비는 전체 모듈 초기화가 끝난 bootstrap 단계에서 시작한다. 종료 시 소비를 먼저 중지한 후 application shutdown 단계에서 완료 이벤트 producer를 닫는다.
 
-### `attention.entry.recorded` — 일반 참가자 입장 (Attention 발행, 설문 문자)
-
-위와 같은 형태의 이벤트. 일반 참가자(`STANDARD`)에게만 설문 링크 문자를 보낸다. 링크는 `sms.surveyUrlTemplate`의 `{expoId}`를 채워 만들고, 템플릿이 없으면 보내지 않는다.
-
-> `user.participant.registered`는 User 쪽에서 확정했다(Expo-User-Server#50). `attention.entry.recorded`의 이름과 필드는 아직 가정한 값이므로, Attention과 확정되면 `kafka.topics.entryRecorded`와 `participant-event.schema.ts`를 맞춘다.
+입장 후 설문 SMS는 2026-10-09 요구 폐기로 제거하였다. 설문은 공개 링크 QR로 받는다.
+근거: [Attendance #53](https://github.com/School-of-Company/Expo-Attendance-Server/issues/53),
+[Notification #3 댓글](https://github.com/School-of-Company/Expo-Notification-Server/issues/3#issuecomment-6075037497).
+등록 QR SMS는 유지하며 개인별 QR 링크 전환은 #9 / PR #22로 develop에 반영되었다.
 
 ### `notification.sms.requested` — 일반 문자 발송 요청
 
@@ -48,7 +66,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 | `DRAW_RESULT` | `phoneNumber`, `drawNumber` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정) |
 | `CUSTOM` | `phoneNumbers[1..1000]`, `senderType`, `text` | 본문을 호출 측이 만든 일반/대량 문자 (연수 일정 안내 포함) |
 
-같은 `eventId`는 7일 동안 한 번만 발송한다(완료 마커 TTL. DLQ를 사람이 며칠 뒤 재처리해도 문자가 중복되지 않게). 그 이후 재전달되면 문자가 다시 나간다. 발송이 전부 실패하면 consumer가 던져 Kafka가 재전달하고, 일부 수신자만 실패하면 재전달하지 않는다(성공한 수신자 중복 발송 방지).
+완료 시점부터 7일 동안 `done-v2` 마커가 남아 있으면 같은 `eventId`의 문자 재발송을 억제한다. TTL 만료나 Redis 유실, 문자 성공 뒤 완료 기록 실패에서는 중복 발송이 가능하므로 정확히 한 번 발송을 보장하지 않는다. 발송이 전부 실패하면 consumer가 던져 Kafka가 재전달하고, 일부 수신자만 실패하면 재전달하지 않는다(성공한 수신자 중복 발송 방지).
 
 #### 연수 신청 CUSTOM 수신 번호 (Notification #11)
 
@@ -92,9 +110,9 @@ Solapi와 Redis는 테스트 대역을 사용하므로 실제 발송이나 upstr
 Redis 키, processing/done 상태 및 TTL 인자는 기존 `sms-stores.spec.ts`가 별도로 검증한다.
 실제 Redis의 TTL 만료 동작을 검증한 것은 아니다.
 
-**DLQ** (세 SMS 토픽 공통): 같은 이벤트 처리가 `sms.eventMaxAttempts`(기본 5)번 실패하면 원본 메시지를 `notification.sms.requested.dlq`로 옮기고(`x-source-topic` 헤더에 출처 토픽) 다음 메시지로 넘어간다.
+**DLQ** (두 SMS 소비 토픽 공통): 같은 이벤트 처리가 `sms.eventMaxAttempts`(기본 5)번 실패하면 원본 메시지를 `notification.sms.requested.dlq`로 옮기고(`x-source-topic` 헤더에 출처 토픽) 다음 메시지로 넘어간다.
 유효한 메시지는 처리 전에 현재 오프셋(다음 오프셋이 아님)을 커밋한다. 첫 메시지가 실패하여 consumer가 재시작되어도 `fromBeginning: false`가 최신 위치로 이동해 해당 메시지를 건너뛰지 않도록 한다. 성공 또는 DLQ 이동 후의 다음 오프셋 커밋은 KafkaJS가 수행한다.
-DLQ로 옮길 때 이벤트별 실패 카운터를 지워서, 재처리한 메시지가 첫 실패에 곧바로 다시 DLQ로 가지 않는다. DLQ 메시지는 원인을 해결한 뒤 7일 안에 수동으로 원 토픽에 다시 넣는다. DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다.
+DLQ로 옮길 때 이벤트별 실패 카운터를 지워서, 재처리한 메시지가 첫 실패에 곧바로 다시 DLQ로 가지 않는다. 연수 CUSTOM은 2026-10-12 Expo 담당자 합의에 따라 원인 해결 후 최초 Notification 처리 시도부터 7일 미만에 원본 `eventId`와 JSON을 유지하여 원 토픽으로 수동 재처리한다. 7일 이상 지났거나 최초 처리 시각을 확인할 수 없는 건은 담당자가 발송 이력과 중복 영향을 수동 판단한다. DLQ 보관 기간은 재처리 허용 기간이 아니다. DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다.
 DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고 원본 처리를 끝낸다. 정리 실패 시 잔존 카운터 때문에 수동 재처리가 조기에 다시 DLQ로 갈 수 있으므로 재처리 전에 해당 실패 카운터를 확인한다.
 
 한 가지 한계: 문자 발송 직후 Redis 장애로 완료 표시가 실패하면(100ms, 200ms 간격으로 총 3회 시도 후 로그만 남김), 선점이 만료(5분)된 뒤 재전달 때 문자가 한 번 더 나갈 수 있다. processing 이벤트는 그동안 건너뛰거나 DLQ로 보내지 않고 기다려 실제 처리 중 이벤트의 유실을 막는다.
@@ -135,7 +153,6 @@ kafka:
     smsRequested: notification.sms.requested
     qrSmsSent: notification.qr-sms.sent
     participantRegistered: user.participant.registered
-    entryRecorded: attention.entry.recorded
     smsDeadLetter: notification.sms.requested.dlq
     expoApplicantCount: expo.applicant-count.updated
 redis:
@@ -149,14 +166,31 @@ sms:                                   # 비밀 값은 Vault
   authMaxSendCountPerHour: 300
   eventMaxAttempts: 5
   authMaxVerifyAttemptCount: 5
+  qrUrlTemplate: ""                     # 비어 있으면 일반 QR 문자 미발송
+  traineeQrUrlTemplate: ""              # 비어 있으면 연수 QR 문자 미발송
+user:                                  # 이름 조회 전용, 통째로 생략하면 역할 라벨
+  baseUrl: "http://<USER_HOST>:8080"
+  internalToken: "…"                    # Vault, 32자 이상
 ```
 
 | 위치 | 키 |
 |---|---|
-| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `attention.internalToken` (32자 이상, Attention의 `INTERNAL_TOKEN` 사본) |
+| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회 전용) |
+
+env 이름 조회 키는 `USER_SERVICE_URL`, `USER_SERVICE_INTERNAL_TOKEN`이다. 둘 다 없으면 fallback하고 일부만 설정되었거나 토큰/URL이 잘못되면 부팅을 실패시킨다. Attention HTTP 설정은 제거했다. User 이름 API만 사용하며 제거된 `sms-try` HTTP 호출은 복구하지 않는다.
 
 config-server 쪽에서 해야 할 일: `configs/notification-{local,dev,prod}.yml` 추가, `docs/service-configs.md` 표와
 `src/config/configs-files.spec.ts`의 `SERVICES`에 `notification` 추가.
 
 TRAINEE CUSTOM의 실제 Kafka/Redis 통합 테스트, 7일 완료 마커, DLQ 재처리 및
 초기 group offset 준비 절차는 [연수 CUSTOM 운영 문서](trainee-custom-sms-operations.md)를 참고한다.
+
+프로그램 대기 승급은 별도 topic/원장/재시도 흐름을 사용한다.
+[Notification #20 계약](notification-20-contract.md)에 수신 JSON, 필요한 Application 검증 API,
+Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행기/API는 아직 연결되지 않았으며
+`promotion.enabled`는 기본 비활성이다. 기존 CUSTOM 이벤트로 승급 안내를 대체하지 않는다.
+
+관리자 그룹 발송의 내부 HTTP payload, 상태 전이, 중복/timeout 처리와 Kakao 승인 template 설정은
+[Notification #10 계약](notification-10-admin-group-messaging.md)에 기록한다. 기능은
+`adminGroupMessaging.enabled`가 true이고 32자 이상의 `internalToken`이 설정된 환경에서만 발송한다.
+Kakao 설정이 없으면 SMS만 사용할 수 있으며 Kakao의 SMS 자동 대체는 꺼져 있다.
