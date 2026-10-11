@@ -84,6 +84,20 @@ function configFromEnv(env: Env): Record<string, unknown> {
       }),
     }),
     ...eurekaFromEnv(env),
+    ...((env.PROMOTION_APPLICATION_URL || env.PROMOTION_ENABLED) && {
+      promotion: {
+        ...pickDefined({
+          enabled: env.PROMOTION_ENABLED,
+          internalToken: env.PROMOTION_INTERNAL_TOKEN,
+          topic: env.KAFKA_PROMOTION_TOPIC,
+          groupId: env.KAFKA_PROMOTION_GROUP_ID,
+        }),
+        application: pickDefined({
+          baseUrl: env.PROMOTION_APPLICATION_URL,
+          internalToken: env.PROMOTION_APPLICATION_INTERNAL_TOKEN,
+        }),
+      },
+    }),
     discord: pickDefined({
       participantNumberUrl: env.DISCORD_PARTICIPANT_NUMBER_URL,
     }),
