@@ -43,6 +43,10 @@ function eurekaFromEnv(env: Env): Record<string, unknown> {
 function configFromEnv(env: Env): Record<string, unknown> {
   return {
     ...pickDefined({ port: env.PORT }),
+    swagger: pickDefined({
+      enabled: env.SWAGGER_ENABLED,
+      includeInternal: env.SWAGGER_INCLUDE_INTERNAL,
+    }),
     kafka: pickDefined({
       brokers: env.KAFKA_BROKERS,
       clientId: env.KAFKA_CLIENT_ID,

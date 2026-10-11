@@ -74,6 +74,31 @@ The reference is Expo-Form-Server's `.github/workflows/ci.yml`, retrieved via
 `gh api repos/School-of-Company/Expo-Form-Server/contents/.github/workflows/ci.yml`:
 blob SHA `4468cd04b5aba0cb7146165287e5240e22dbb63f`.
 
+## Swagger API 문서
+
+문서는 기본 비활성화입니다. 선택 환경 변수는 없어도 부팅됩니다.
+
+| 환경 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `SWAGGER_ENABLED` | `false` | `true`일 때 문서 경로를 등록합니다. |
+| `SWAGGER_INCLUDE_INTERNAL` | `false` | `true`일 때 `/internal/**` API도 문서에 포함합니다. |
+
+설정 서버에서는 `swagger.enabled`, `swagger.includeInternal`로 지정하며,
+기존 로더와 동일하게 설정 서버 값이 환경 변수보다 우선합니다.
+
+- OpenAPI JSON: `GET /sms/v3/api-docs`
+- Swagger UI: `GET /sms/docs`
+- 비활성화 시 JSON과 UI 모두 `404`입니다. 내부 포함 옵션만 켜도 문서는 열리지 않습니다.
+- 내부 API 포함 시 `X-Internal-Token` 헤더를 `internalToken` API key 인증 스키마로 표시합니다.
+  문서 옵션은 실제 내부 API 인증이나 활성화 설정을 변경하지 않습니다.
+- 설명은 한국어이며 전화번호, 인증번호, 메시지 ID는 합성 예시입니다. 토큰 값은 문서에 넣지 않습니다.
+- 게이트웨이 개발 프로필의 `docs.services`와 `GET /sms/v3/api-docs` 공개 경로 등록은
+  설정 서버 담당자가 별도 PR로 진행합니다. 운영 공개는 기본 설정에 포함되지 않습니다.
+
+구현 참고: [NestJS Swagger 설정](https://docs.nestjs.com/openapi/introduction),
+[DTO 문서](https://docs.nestjs.com/openapi/types-and-parameters),
+[인증 스키마](https://docs.nestjs.com/openapi/security).
+
 ## Run tests locally
 
 ```bash

@@ -3,6 +3,7 @@ import { AppConfig } from '../../src/config/app-config';
 export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 3000,
+    swagger: { enabled: false, includeInternal: false },
     kafka: {
       brokers: ['localhost:9092'],
       clientId: 'expo-notification-server',
