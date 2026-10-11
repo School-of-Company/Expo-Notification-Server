@@ -4,16 +4,19 @@
 
 ```
 <feature>/
-├── <feature>.controller.ts   — Entry point. Input validation and error→HTTP mapping only.
+├── <feature>.controller.ts   — HTTP entry point. Input validation and error→HTTP mapping only.
+├── <feature>.consumer.ts     — Kafka entry point. Parse + zod-validate, then delegate to a service.
+├── <feature>.scheduler.ts    — Cron entry point. Delegates to a service.
 ├── <feature>.service.ts      — Orchestration / business logic.
-├── <feature>.provider.ts     — External I/O (push gateway, HTTP, DB).
+├── <feature>.provider.ts     — External I/O to third parties (Solapi, Discord).
+├── <feature>.store.ts        — Redis persistence primitives. No business decisions.
 └── <feature>.module.ts       — Wiring only.
 ```
 
 ## Dependency Direction
 
 ```
-controller → service → provider
+controller | consumer | scheduler → service → provider | store
 ```
 
 Reverse dependencies are forbidden (e.g., a provider knowing about a service, or a service knowing about the controller).
@@ -42,7 +45,13 @@ Reverse dependencies are forbidden (e.g., a provider knowing about a service, or
 
 ## Environment Validation
 
-- If `@nestjs/config` is added, use `4.x`, not `12.x` — `12.x` ships as pure ESM and breaks ts-jest/CommonJS.
+- Config is loaded once by `src/config/load-config.ts` (config server over env, validated with zod) and injected via the `APP_CONFIG` token — services never read `process.env`. `process.env` is touched only in that loader.
+- Use CJS-compatible majors under ts-jest/CommonJS: `@nestjs/schedule@6.x` (`12.x` is pure ESM) and `@nestjs/config@4.x` if ever added.
 - Validate required env vars at boot so the app fails fast instead of failing on the first request.
-- **Gotcha:** `ConfigService` snapshots validated env at `AppModule` import time — set required env in
-  `test/jest-e2e.setup.ts` (Jest `setupFiles`), not in a spec file's `beforeAll`.
+- In tests, override the `APP_CONFIG` provider with `createAppConfig()` (`test/fixtures/app-config.fixture.ts`).
+
+## Kafka Consumers
+
+- A malformed or schema-invalid message is logged and skipped (never thrown) — throwing makes Kafka redeliver forever.
+- A downstream failure (Solapi down) is thrown so Kafka redelivers; protect against duplicates with an `eventId` claim that is released on failure.
+- Producers must send `eventId` + `version`; see `docs/events-and-config.md`.

@@ -2,11 +2,11 @@
 
 ## When to Use
 
-Before starting any new work. Always branch off `origin/main`.
-Never commit directly to `main` or `main`.
+Before starting any new work. Always branch off `origin/develop`.
+Never commit directly to `develop` or `main`.
 
-`main` is the integration branch — all feature/fix/chore work branches from and PRs back into
-`main`. `main` only moves via a separate `main` → `main` release PR (not something this skill
+`develop` is the integration branch — all feature/fix/chore work branches from and PRs back into
+`develop`. `main` only moves via a separate `develop` → `main` release PR (not something this skill
 creates).
 
 ## Inputs
@@ -16,14 +16,14 @@ creates).
 
 ## Steps
 
-1. Fetch latest main:
+1. Fetch latest develop:
    ```bash
-   git fetch origin main
+   git fetch origin develop
    ```
 
 2. Create and switch to branch:
    ```bash
-   git checkout -b <type>/<scope> origin/main
+   git checkout -b <type>/<scope> origin/develop
    ```
 
 3. Push and set upstream:
@@ -44,6 +44,6 @@ creates).
 
 ## Rules
 
-- Always branch from `origin/main`, not local `main`.
+- Always branch from `origin/develop`, not local `develop`.
 - Scope must be specific enough to identify the work (not `update` or `changes`).
 - Do not reuse old branches for new work.
