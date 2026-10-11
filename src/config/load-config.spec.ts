@@ -7,8 +7,8 @@ const baseEnv = {
   SMS_API_SECRET: 'env-secret',
   SMS_FROM_STANDARD_NUMBER: '0623804504',
   SMS_FROM_TRAINEE_NUMBER: '0623804587',
-  ATTENTION_SERVICE_URL: 'http://attention:8080',
-  ATTENTION_SERVICE_INTERNAL_TOKEN: 'a'.repeat(32),
+  USER_SERVICE_URL: 'http://user:8080',
+  USER_SERVICE_INTERNAL_TOKEN: 'a'.repeat(32),
 };
 
 const jsonResponse = (body: unknown, status = 200) => ({
@@ -67,11 +67,11 @@ describe('loadConfig', () => {
 
   it('내부 호출 토큰이 32자 미만이면 부팅을 실패시킨다 (토큰 값은 노출하지 않는다)', async () => {
     const promise = loadConfig(
-      { ...baseEnv, ATTENTION_SERVICE_INTERNAL_TOKEN: 'short-secret' },
+      { ...baseEnv, USER_SERVICE_INTERNAL_TOKEN: 'short-secret' },
       jest.fn(),
     );
 
-    await expect(promise).rejects.toThrow(/attention\.internalToken/);
+    await expect(promise).rejects.toThrow(/user\.internalToken/);
     await expect(promise).rejects.not.toThrow(/short-secret/);
   });
 
@@ -167,6 +167,63 @@ describe('loadConfig', () => {
     const env = { ...baseEnv, SMS_API_KEY: undefined };
 
     await expect(loadConfig(env, jest.fn())).rejects.toThrow(/sms\.apiKey/);
+  });
+
+  it('User 이름 조회 설정은 통째로 없으면 선택 사항이다', async () => {
+    const config = await loadConfig(
+      { ...baseEnv, USER_SERVICE_URL: '', USER_SERVICE_INTERNAL_TOKEN: '' },
+      jest.fn(),
+    );
+    expect(config.user).toBeUndefined();
+    expect(config.sms.qrUrlTemplate).toBeUndefined();
+  });
+
+  it('QR 템플릿 env를 읽고 config 서버의 빈 값은 발송을 끈다', async () => {
+    const template =
+      'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}';
+    const config = await loadConfig(
+      {
+        ...baseEnv,
+        SMS_QR_URL_TEMPLATE: template,
+        SMS_TRAINEE_QR_URL_TEMPLATE: 'trainee',
+      },
+      jest.fn(),
+    );
+    expect(config.sms.qrUrlTemplate).toBe(template);
+    expect(config.sms.traineeQrUrlTemplate).toBe('trainee');
+    const disabled = await loadConfig(
+      {
+        ...baseEnv,
+        SMS_QR_URL_TEMPLATE: template,
+        CONFIG_SERVER_URL: 'http://config',
+      },
+      jest.fn().mockResolvedValue(jsonResponse({ sms: { qrUrlTemplate: '' } })),
+    );
+    expect(disabled.sms.qrUrlTemplate).toBe('');
+  });
+
+  it.each([
+    { USER_SERVICE_URL: undefined },
+    { USER_SERVICE_INTERNAL_TOKEN: undefined },
+    { USER_SERVICE_URL: 'invalid' },
+  ])(
+    'User 설정 일부만 있거나 URL이 잘못되면 부팅을 실패시킨다: %j',
+    async (override) => {
+      await expect(
+        loadConfig({ ...baseEnv, ...override }, jest.fn()),
+      ).rejects.toThrow(/user\./);
+    },
+  );
+
+  it('템플릿이 문자열이 아니면 값 노출 없이 부팅을 실패시킨다', async () => {
+    await expect(
+      loadConfig(
+        { ...baseEnv, CONFIG_SERVER_URL: 'http://config' },
+        jest
+          .fn()
+          .mockResolvedValue(jsonResponse({ sms: { qrUrlTemplate: 123 } })),
+      ),
+    ).rejects.toThrow(/sms.qrUrlTemplate/);
   });
 
   it('검증 에러 메시지에 비밀 값이 포함되지 않는다', async () => {

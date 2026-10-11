@@ -29,10 +29,14 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       expoName: '광주 박람회',
       contactStandardNumber: '062-380-4504',
       contactTraineeNumber: '062-380-4587',
+      qrUrlTemplate:
+        'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
+      traineeQrUrlTemplate:
+        'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}',
       authMaxVerifyAttemptCount: 5,
     },
-    attention: {
-      baseUrl: 'http://attention.test',
+    user: {
+      baseUrl: 'http://user.test',
       internalToken: 'a'.repeat(32),
     },
     discord: { participantNumberUrl: 'https://discord.test/webhook' },

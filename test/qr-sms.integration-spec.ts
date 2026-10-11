@@ -5,7 +5,7 @@ import { Kafka, logLevel } from 'kafkajs';
 import { APP_CONFIG } from '../src/config/app-config.constants';
 import { KAFKA_CLIENT } from '../src/kafka/kafka.constants';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
-import { AttentionClientProvider } from '../src/sms/attention-client.provider';
+import { ParticipantNamesProvider } from '../src/sms/participant-names.provider';
 import { ParticipantRegisteredConsumer } from '../src/sms/participant-registered.consumer';
 import { QrSmsSentPublisher } from '../src/sms/qr-sms-sent.publisher';
 import { QrSmsService } from '../src/sms/qr-sms.service';
@@ -32,8 +32,8 @@ describe('QR SMS with real Kafka and Redis', () => {
   const observer = kafka.consumer({ groupId: `${prefix}.observer` });
   const messages: { topic: string; key: string; value: unknown }[] = [];
   const sender = { send: jest.fn().mockResolvedValue({ failedTo: [] }) };
-  const attention = {
-    createQrImage: jest.fn().mockResolvedValue('https://qr.test/image'),
+  const names = {
+    findNames: jest.fn().mockResolvedValue(new Map()),
   };
   let moduleRef: TestingModule;
   let publish: jest.SpyInstance;
@@ -43,6 +43,7 @@ describe('QR SMS with real Kafka and Redis', () => {
     participationType,
     id: 42,
     phoneNumber: '01012345678',
+    participants: [{ id: 42, code: 'a'.repeat(22) }],
   });
   const emit = (payload: ReturnType<typeof event>) =>
     producer.send({
@@ -89,7 +90,7 @@ describe('QR SMS with real Kafka and Redis', () => {
         { provide: APP_CONFIG, useValue: config },
         { provide: KAFKA_CLIENT, useValue: kafka },
         { provide: REDIS_CLIENT, useValue: redis },
-        { provide: AttentionClientProvider, useValue: attention },
+        { provide: ParticipantNamesProvider, useValue: names },
         { provide: SmsSenderProvider, useValue: sender },
         SmsEventDedupeStore,
         SmsEventGuard,
@@ -139,7 +140,7 @@ describe('QR SMS with real Kafka and Redis', () => {
     );
     expect(publish).toHaveBeenCalledTimes(8);
     expect(sender.send).toHaveBeenCalledTimes(1);
-    expect(attention.createQrImage).toHaveBeenCalledTimes(1);
+    expect(names.findNames).toHaveBeenCalledTimes(1);
     expect(messages).toEqual([
       {
         topic: config.kafka.topics.qrSmsSent,
@@ -190,9 +191,7 @@ describe('QR SMS with real Kafka and Redis', () => {
 
   it('moves send failures to DLQ and resets attempts for manual replay', async () => {
     const payload = event('dlq');
-    attention.createQrImage.mockRejectedValue(
-      new Error('Attention unavailable'),
-    );
+    sender.send.mockResolvedValue({ failedTo: ['01012345678'] });
     const before = sender.send.mock.calls.length;
     await emit(payload);
     await until(() =>
@@ -204,9 +203,11 @@ describe('QR SMS with real Kafka and Redis', () => {
       async () =>
         (await redis.exists(`sms:event-fail:${payload.eventId}`)) === 0,
     );
-    expect(sender.send).toHaveBeenCalledTimes(before);
+    expect(sender.send).toHaveBeenCalledTimes(
+      before + config.sms.eventMaxAttempts,
+    );
     expect(await redis.get(`sms:event:${payload.eventId}`)).toBeNull();
-    attention.createQrImage.mockResolvedValue('https://qr.test/image');
+    sender.send.mockResolvedValue({ failedTo: [] });
     await emit(payload);
     await until(() =>
       messages.some(
@@ -215,7 +216,9 @@ describe('QR SMS with real Kafka and Redis', () => {
           message.topic === config.kafka.topics.qrSmsSent,
       ),
     );
-    expect(sender.send).toHaveBeenCalledTimes(before + 1);
+    expect(sender.send).toHaveBeenCalledTimes(
+      before + config.sms.eventMaxAttempts + 1,
+    );
   }, 30000);
 
   it('does not publish a completion event for an HTTP-era done marker', async () => {

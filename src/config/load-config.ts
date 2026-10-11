@@ -73,11 +73,15 @@ function configFromEnv(env: Env): Record<string, unknown> {
       expoName: env.SMS_EXPO_NAME,
       contactStandardNumber: env.SMS_CONTACT_STANDARD_NUMBER,
       contactTraineeNumber: env.SMS_CONTACT_TRAINEE_NUMBER,
+      qrUrlTemplate: env.SMS_QR_URL_TEMPLATE,
+      traineeQrUrlTemplate: env.SMS_TRAINEE_QR_URL_TEMPLATE,
       authMaxVerifyAttemptCount: env.SMS_AUTH_MAX_VERIFY_ATTEMPT_COUNT,
     }),
-    attention: pickDefined({
-      baseUrl: env.ATTENTION_SERVICE_URL,
-      internalToken: env.ATTENTION_SERVICE_INTERNAL_TOKEN,
+    ...((env.USER_SERVICE_URL || env.USER_SERVICE_INTERNAL_TOKEN) && {
+      user: pickDefined({
+        baseUrl: env.USER_SERVICE_URL,
+        internalToken: env.USER_SERVICE_INTERNAL_TOKEN,
+      }),
     }),
     ...eurekaFromEnv(env),
     discord: pickDefined({

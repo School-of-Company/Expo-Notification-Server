@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { SolapiMessageService } from 'solapi';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
-import { AttentionClientProvider } from './attention-client.provider';
+import { ParticipantNamesProvider } from './participant-names.provider';
 import { ParticipantRegisteredConsumer } from './participant-registered.consumer';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { QrSmsService } from './qr-sms.service';
@@ -31,7 +31,7 @@ import { SmsController } from './sms.controller';
     SmsAuthService,
     SmsEventService,
     SmsEventGuard,
-    AttentionClientProvider,
+    ParticipantNamesProvider,
     QrSmsSentPublisher,
     QrSmsService,
     SmsEventConsumer,

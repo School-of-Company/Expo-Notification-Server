@@ -45,15 +45,17 @@ describe('Notification server (e2e)', () => {
     ).embeds[0].fields;
 
   beforeEach(async () => {
+    config.sms = createAppConfig().sms;
     handlers.clear();
     solapiSend = jest.fn().mockResolvedValue({ failedMessageList: [] });
     fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation((input) =>
       Promise.resolve(
-        urlOf(input).endsWith('/internal/qr-images')
+        urlOf(input).endsWith('/internal/standard-participants/names')
           ? ({
               ok: true,
-              status: 201,
-              json: () => Promise.resolve({ url: 'https://s3.test/qr.jpg' }),
+              status: 200,
+              json: () =>
+                Promise.resolve([{ participantId: 42, name: '홍길동' }]),
             } as Response)
           : ({ ok: true, status: 204 } as Response),
       ),
@@ -290,13 +292,14 @@ describe('Notification server (e2e)', () => {
     });
   });
 
-  describe('QR 문자 (Kafka → Attention/User 내부 호출)', () => {
+  describe('QR 문자 (Kafka → User 이름 조회)', () => {
     const registered = {
       eventId: 'reg-1',
       expoId: 'expo-1',
       participationType: 'STANDARD',
       id: 42,
       phoneNumber: '010-1234-5678',
+      participants: [{ id: 42, code: 'a'.repeat(22) }],
     };
     const registeredGroup = `${config.kafka.smsGroupId}.participant-registered`;
     const callsTo = (suffix: string) =>
@@ -319,14 +322,16 @@ describe('Notification server (e2e)', () => {
           >,
         }));
 
-    it('등록 완료 이벤트: QR URL을 받아 문자를 보내고 발송 완료 이벤트를 발행한다 (sms-try HTTP 호출은 없다)', async () => {
+    it('등록 완료 이벤트: QR 페이지 링크 문자를 보내고 발송 완료 이벤트를 발행한다 (sms-try HTTP 호출은 없다)', async () => {
       await emit(registeredGroup, registered);
 
-      expect(callsTo('/internal/qr-images')).toHaveLength(1);
+      expect(callsTo('/internal/standard-participants/names')).toHaveLength(1);
       expect(sentBatches()[0][0][0]).toEqual({
         to: '01012345678',
         from: config.sms.fromStandardNumber,
-        text: expect.stringContaining('https://s3.test/qr.jpg') as string,
+        text: expect.stringContaining(
+          '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=',
+        ) as string,
       });
       expect(sentEvents()).toEqual([
         {
@@ -342,13 +347,90 @@ describe('Notification server (e2e)', () => {
       expect(callsTo('/internal/participants/sms-try')).toHaveLength(0);
     });
 
-    it('같은 이벤트 재전달은 QR 생성, 문자, 발행을 다시 하지 않는다', async () => {
+    it('같은 이벤트 재전달은 이름 조회, 문자, 발행을 다시 하지 않는다', async () => {
       await emit(registeredGroup, registered);
       await emit(registeredGroup, registered);
 
-      expect(callsTo('/internal/qr-images')).toHaveLength(1);
+      expect(callsTo('/internal/standard-participants/names')).toHaveLength(1);
       expect(solapiSend).toHaveBeenCalledTimes(1);
       expect(sentEvents()).toHaveLength(1);
+    });
+
+    it('User 이름 조회 404는 fallback 문자를 계속 발송한다', async () => {
+      fetchSpy.mockResolvedValueOnce({ ok: false, status: 404 });
+      await emit(registeredGroup, registered);
+      expect(sentBatches()[0][0][0].text).toContain('대표자:');
+      expect(sentEvents()).toHaveLength(1);
+    });
+
+    it('5명은 대표자 먼저 나머지 순서대로 한 문자에 담는다', async () => {
+      fetchSpy.mockResolvedValueOnce({ ok: false, status: 404 });
+      await emit(registeredGroup, {
+        ...registered,
+        participants: [45, 43, 42, 44, 46].map((id) => ({
+          id,
+          code: 'a'.repeat(22),
+        })),
+      });
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+      expect(sentBatches()[0][0]).toHaveLength(1);
+      expect(sentBatches()[0][0][0].text.match(/id=\d+/g)).toEqual([
+        'id=42',
+        'id=45',
+        'id=43',
+        'id=44',
+        'id=46',
+      ]);
+      expect(sentEvents()).toHaveLength(1);
+    });
+
+    it('템플릿 미설정은 소비를 끝내되 문자/완료/발행 기록이 없다', async () => {
+      config.sms.qrUrlTemplate = '';
+      await emit(registeredGroup, registered);
+      expect(solapiSend).not.toHaveBeenCalled();
+      expect(sentEvents()).toHaveLength(0);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(
+        await app.get<FakeRedis>(REDIS_CLIENT).get('sms:event:reg-1'),
+      ).toBeNull();
+    });
+
+    it('누락된 STANDARD code는 재시도 후 DLQ로 이동하고 성공을 기록하지 않는다', async () => {
+      const unsupported = { ...registered, participants: [{ id: 42 }] };
+      for (let i = 1; i < config.sms.eventMaxAttempts; i += 1) {
+        await expect(emit(registeredGroup, unsupported)).rejects.toThrow(
+          'requires participants and code',
+        );
+      }
+      await emit(registeredGroup, unsupported);
+      expect(solapiSend).not.toHaveBeenCalled();
+      expect(sentEvents()).toHaveLength(0);
+      expect(producerSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          topic: config.kafka.topics.smsDeadLetter,
+        }),
+      );
+      expect(
+        await app.get<FakeRedis>(REDIS_CLIENT).get('sms:event:reg-1'),
+      ).toBeNull();
+    });
+
+    it('malformed code는 기존 스키마 실패 정책으로 미발송/미발행한다', async () => {
+      await emit(registeredGroup, {
+        ...registered,
+        participants: [{ id: 42, code: 'bad' }],
+      });
+      expect(solapiSend).not.toHaveBeenCalled();
+      expect(producerSend).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('legacy done 이벤트는 문자나 완료 이벤트 없이 끝낸다', async () => {
+      await app.get<FakeRedis>(REDIS_CLIENT).set('sms:event:reg-1', 'done');
+      await emit(registeredGroup, { ...registered, participants: undefined });
+      expect(solapiSend).not.toHaveBeenCalled();
+      expect(sentEvents()).toHaveLength(0);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it('연수자 이벤트는 연수 발신번호로 보내고 발송 완료 이벤트는 발행하지 않는다', async () => {
@@ -361,15 +443,15 @@ describe('Notification server (e2e)', () => {
       expect(sentEvents()).toHaveLength(0);
     });
 
-    it('Attention이 실패하면 문자도 이벤트도 없이 던진 뒤, 재전달되면 다시 시도한다', async () => {
-      fetchSpy.mockResolvedValueOnce({ ok: false, status: 503 });
+    it('SMS가 실패하면 문자 완료 이벤트 없이 던진 뒤, 재전달되면 다시 시도한다', async () => {
+      solapiSend.mockRejectedValueOnce(new Error('gateway failed'));
 
       await expect(emit(registeredGroup, registered)).rejects.toThrow();
-      expect(solapiSend).not.toHaveBeenCalled();
+      expect(solapiSend).toHaveBeenCalledTimes(1);
       expect(sentEvents()).toHaveLength(0);
 
       await emit(registeredGroup, registered);
-      expect(solapiSend).toHaveBeenCalledTimes(1);
+      expect(solapiSend).toHaveBeenCalledTimes(2);
       expect(sentEvents()).toHaveLength(1);
     });
 
@@ -384,7 +466,7 @@ describe('Notification server (e2e)', () => {
       await emit(registeredGroup, registered);
 
       expect(solapiSend).toHaveBeenCalledTimes(1);
-      expect(callsTo('/internal/qr-images')).toHaveLength(1);
+      expect(callsTo('/internal/standard-participants/names')).toHaveLength(1);
       expect(sentEvents()).toHaveLength(2);
     });
 
