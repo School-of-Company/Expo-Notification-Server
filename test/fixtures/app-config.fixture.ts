@@ -13,7 +13,6 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         smsDeadLetter: 'notification.sms.requested.dlq',
         qrSmsSent: 'notification.qr-sms.sent',
         participantRegistered: 'user.participant.registered',
-        entryRecorded: 'attention.entry.recorded',
         expoApplicantCount: 'expo.applicant-count.updated',
       },
     },
@@ -30,7 +29,6 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       expoName: '광주 박람회',
       contactStandardNumber: '062-380-4504',
       contactTraineeNumber: '062-380-4587',
-      surveyUrlTemplate: 'https://survey.test/expo/{expoId}',
       authMaxVerifyAttemptCount: 5,
     },
     attention: {

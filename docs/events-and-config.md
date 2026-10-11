@@ -2,7 +2,7 @@
 
 ## Kafka 이벤트
 
-공통: JSON, UTF-8. `eventId`(멱등키)는 필수. `version: 1`은 `notification.sms.requested`와 `expo.applicant-count.updated`에 필수이며, `user.participant.registered`와 `attention.entry.recorded`에는 요구하지 않는다. 스키마가 틀린 메시지는 로그만 남기고 건너뛴다.
+공통: JSON, UTF-8. `eventId`(멱등키)는 필수. `version: 1`은 `notification.sms.requested`와 `expo.applicant-count.updated`에 필수이며, `user.participant.registered`에는 요구하지 않는다. 스키마가 틀린 메시지는 로그만 남기고 건너뛴다.
 
 ### `user.participant.registered` — 등록 완료 (User 발행, QR 문자)
 
@@ -33,11 +33,10 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 - 전환 전 HTTP 방식의 Redis `sms:event:{eventId}=done`은 문자와 완료 이벤트를 모두 건너뛴다. 새 완료 마커는 `done-v2`로 저장해 발행 대기 상태와 구분한다. 기존 HTTP 호출 실패 여부는 마커에 없어 과거 미집계 이벤트를 자동 복구하지 않으며, 기존 마커 만료 이후의 재전달은 구분할 수 없다. 구버전 소비자를 종료하고 처리 중 메시지를 정리한 뒤 전환한다.
 - 완료 이벤트 producer는 모듈 초기화에서 연결하고, SMS 소비는 전체 모듈 초기화가 끝난 bootstrap 단계에서 시작한다. 종료 시 소비를 먼저 중지한 후 application shutdown 단계에서 완료 이벤트 producer를 닫는다.
 
-### `attention.entry.recorded` — 일반 참가자 입장 (Attention 발행, 설문 문자)
-
-위와 같은 형태의 이벤트. 일반 참가자(`STANDARD`)에게만 설문 링크 문자를 보낸다. 링크는 `sms.surveyUrlTemplate`의 `{expoId}`를 채워 만들고, 템플릿이 없으면 보내지 않는다.
-
-> `user.participant.registered`는 User 쪽에서 확정했다(Expo-User-Server#50). `attention.entry.recorded`의 이름과 필드는 아직 가정한 값이므로, Attention과 확정되면 `kafka.topics.entryRecorded`와 `participant-event.schema.ts`를 맞춘다.
+입장 후 설문 SMS는 2026-10-09 요구 폐기로 제거하였다. 설문은 공개 링크 QR로 받는다.
+근거: [Attendance #53](https://github.com/School-of-Company/Expo-Attendance-Server/issues/53),
+[Notification #3 댓글](https://github.com/School-of-Company/Expo-Notification-Server/issues/3#issuecomment-6075037497).
+등록 QR SMS는 유지하며 개인별 QR 링크 전환은 #9 / PR #22에서 별도로 진행한다.
 
 ### `notification.sms.requested` — 일반 문자 발송 요청
 
@@ -92,7 +91,7 @@ Solapi와 Redis는 테스트 대역을 사용하므로 실제 발송이나 upstr
 Redis 키, processing/done 상태 및 TTL 인자는 기존 `sms-stores.spec.ts`가 별도로 검증한다.
 실제 Redis의 TTL 만료 동작을 검증한 것은 아니다.
 
-**DLQ** (세 SMS 토픽 공통): 같은 이벤트 처리가 `sms.eventMaxAttempts`(기본 5)번 실패하면 원본 메시지를 `notification.sms.requested.dlq`로 옮기고(`x-source-topic` 헤더에 출처 토픽) 다음 메시지로 넘어간다.
+**DLQ** (두 SMS 소비 토픽 공통): 같은 이벤트 처리가 `sms.eventMaxAttempts`(기본 5)번 실패하면 원본 메시지를 `notification.sms.requested.dlq`로 옮기고(`x-source-topic` 헤더에 출처 토픽) 다음 메시지로 넘어간다.
 유효한 메시지는 처리 전에 현재 오프셋(다음 오프셋이 아님)을 커밋한다. 첫 메시지가 실패하여 consumer가 재시작되어도 `fromBeginning: false`가 최신 위치로 이동해 해당 메시지를 건너뛰지 않도록 한다. 성공 또는 DLQ 이동 후의 다음 오프셋 커밋은 KafkaJS가 수행한다.
 DLQ로 옮길 때 이벤트별 실패 카운터를 지워서, 재처리한 메시지가 첫 실패에 곧바로 다시 DLQ로 가지 않는다. DLQ 메시지는 원인을 해결한 뒤 7일 안에 수동으로 원 토픽에 다시 넣는다. DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다.
 DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고 원본 처리를 끝낸다. 정리 실패 시 잔존 카운터 때문에 수동 재처리가 조기에 다시 DLQ로 갈 수 있으므로 재처리 전에 해당 실패 카운터를 확인한다.
@@ -135,7 +134,6 @@ kafka:
     smsRequested: notification.sms.requested
     qrSmsSent: notification.qr-sms.sent
     participantRegistered: user.participant.registered
-    entryRecorded: attention.entry.recorded
     smsDeadLetter: notification.sms.requested.dlq
     expoApplicantCount: expo.applicant-count.updated
 redis:

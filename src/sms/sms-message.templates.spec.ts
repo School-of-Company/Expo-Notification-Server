@@ -1,8 +1,4 @@
-import {
-  renderQrSms,
-  renderSms,
-  renderSurveySms,
-} from './sms-message.templates';
+import { renderQrSms, renderSms } from './sms-message.templates';
 
 const base = { eventId: 'e1', version: 1 as const };
 
@@ -53,17 +49,5 @@ describe('renderQrSms', () => {
     expect(
       renderQrSms({ expoName: '박람회', qrUrl: 'https://s3.example/qr.jpg' }),
     ).not.toContain('문의');
-  });
-});
-
-describe('renderSurveySms', () => {
-  it('행사명과 설문 링크를 담는다', () => {
-    const text = renderSurveySms({
-      expoName: '광주 박람회',
-      surveyUrl: 'https://survey.example/1',
-    });
-
-    expect(text).toContain('광주 박람회 설문조사');
-    expect(text).toContain('https://survey.example/1');
   });
 });

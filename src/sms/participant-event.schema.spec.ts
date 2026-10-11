@@ -1,7 +1,4 @@
-import {
-  entryRecordedSchema,
-  participantRegisteredSchema,
-} from './participant-event.schema';
+import { participantRegisteredSchema } from './participant-event.schema';
 
 const valid = {
   eventId: 'e1',
@@ -34,11 +31,5 @@ describe('participantRegisteredSchema', () => {
     ['전화번호 형식 오류', { ...valid, phoneNumber: '1234' }],
   ])('%s는 거부한다', (_name, payload) => {
     expect(participantRegisteredSchema.safeParse(payload).success).toBe(false);
-  });
-});
-
-describe('entryRecordedSchema', () => {
-  it('같은 형태의 입장 이벤트를 받는다', () => {
-    expect(entryRecordedSchema.safeParse(valid).success).toBe(true);
   });
 });
