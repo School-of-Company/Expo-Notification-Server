@@ -1,0 +1,8 @@
+{
+  "rootDir": "../..",
+  "testEnvironment": "node",
+  "testRegex": "test/integration/.*\\.integration-spec\\.ts$",
+  "transform": { "^.+\\.ts$": "ts-jest" },
+  "testTimeout": 60000,
+  "maxWorkers": 1
+}
