@@ -59,9 +59,11 @@ export const appConfigSchema = z.object({
     contactStandardNumber: z.string().min(1).optional(),
     contactTraineeNumber: z.string().min(1).optional(),
     surveyUrlTemplate: z.string().min(1).optional(),
+    qrUrlTemplate: z.string().trim().optional(),
+    traineeQrUrlTemplate: z.string().trim().optional(),
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
   }),
-  attention: serviceClient,
+  user: serviceClient.optional(),
   eureka: z
     .object({
       serviceUrl: z.union([z.string().min(1), z.array(z.string().min(1))]),

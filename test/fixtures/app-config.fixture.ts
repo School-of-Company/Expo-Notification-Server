@@ -31,10 +31,14 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       contactStandardNumber: '062-380-4504',
       contactTraineeNumber: '062-380-4587',
       surveyUrlTemplate: 'https://survey.test/expo/{expoId}',
+      qrUrlTemplate:
+        'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
+      traineeQrUrlTemplate:
+        'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}',
       authMaxVerifyAttemptCount: 5,
     },
-    attention: {
-      baseUrl: 'http://attention.test',
+    user: {
+      baseUrl: 'http://user.test',
       internalToken: 'a'.repeat(32),
     },
     discord: { participantNumberUrl: 'https://discord.test/webhook' },

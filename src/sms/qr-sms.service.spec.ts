@@ -1,14 +1,21 @@
+import { Test } from '@nestjs/testing';
+import { APP_CONFIG } from '../config/app-config.constants';
+import { REDIS_CLIENT } from '../redis/redis.constants';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
-import { AttentionClientProvider } from './attention-client.provider';
-import { ParticipantRegisteredEvent } from './participant-event.schema';
+import { FakeRedis } from '../../test/fixtures/fake-redis';
+import type { ParticipantRegisteredEvent } from './participant-event.schema';
+import { ParticipantNamesProvider } from './participant-names.provider';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { QrSmsService } from './qr-sms.service';
-import { EventInProgressError, SentEventPublishError } from './sms-errors';
+import {
+  EventInProgressError,
+  QrLinkError,
+  SentEventPublishError,
+} from './sms-errors';
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
 import { SmsEventGuard } from './sms-event.guard';
-import { SmsSenderProvider } from './sms-sender.provider';
-
-const config = createAppConfig();
+import { SmsSenderProvider, type OutgoingSms } from './sms-sender.provider';
+import { SOLAPI_CLIENT } from './sms.constants';
 
 const standard: ParticipantRegisteredEvent = {
   eventId: 'e1',
@@ -16,183 +23,271 @@ const standard: ParticipantRegisteredEvent = {
   participationType: 'STANDARD',
   id: 42,
   phoneNumber: '01012345678',
-};
-const trainee: ParticipantRegisteredEvent = {
-  ...standard,
-  eventId: 'e2',
-  participationType: 'TRAINEE',
+  participants: [{ id: 42, code: 'a'.repeat(22) }],
 };
 
 describe('QrSmsService', () => {
-  let dedupe: {
-    claim: jest.Mock;
-    complete: jest.Mock;
-    release: jest.Mock;
-    isPublished: jest.Mock;
-    markPublished: jest.Mock;
-  };
-  let attention: { createQrImage: jest.Mock };
-  let sender: { send: jest.Mock };
-  let publisher: { publish: jest.Mock };
+  const config = createAppConfig();
+  let redis: FakeRedis;
   let service: QrSmsService;
+  let store: SmsEventDedupeStore;
+  const send = jest.fn<
+    Promise<{ failedMessageList: { to: string }[] }>,
+    [OutgoingSms[]]
+  >();
+  const publish = jest.fn<Promise<void>, [unknown]>();
+  const fetchSpy = jest.spyOn(globalThis, 'fetch');
 
-  beforeEach(() => {
-    dedupe = {
-      claim: jest.fn().mockResolvedValue('claimed'),
-      complete: jest.fn(),
-      release: jest.fn().mockResolvedValue(undefined),
-      isPublished: jest.fn().mockResolvedValue(false),
-      markPublished: jest.fn().mockResolvedValue(undefined),
-    };
-    attention = {
-      createQrImage: jest.fn().mockResolvedValue('https://s3.example/qr.jpg'),
-    };
-    sender = { send: jest.fn().mockResolvedValue({ total: 1, failedTo: [] }) };
-    publisher = { publish: jest.fn() };
-    const store = dedupe as unknown as SmsEventDedupeStore;
-    service = new QrSmsService(
-      config,
-      new SmsEventGuard(store),
-      store,
-      attention as unknown as AttentionClientProvider,
-      sender as unknown as SmsSenderProvider,
-      publisher as unknown as QrSmsSentPublisher,
-    );
+  beforeEach(async () => {
+    config.sms = { ...createAppConfig().sms };
+    redis = new FakeRedis();
+    send.mockReset().mockResolvedValue({ failedMessageList: [] });
+    publish.mockReset().mockResolvedValue(undefined);
+    fetchSpy
+      .mockReset()
+      .mockResolvedValue(
+        Response.json([{ participantId: 42, name: '홍길동' }]),
+      );
+    const module = await Test.createTestingModule({
+      providers: [
+        { provide: APP_CONFIG, useValue: config },
+        { provide: REDIS_CLIENT, useValue: redis },
+        { provide: SOLAPI_CLIENT, useValue: { send } },
+        { provide: QrSmsSentPublisher, useValue: { publish } },
+        SmsEventDedupeStore,
+        SmsEventGuard,
+        ParticipantNamesProvider,
+        SmsSenderProvider,
+        QrSmsService,
+      ],
+    }).compile();
+    service = module.get(QrSmsService);
+    store = module.get(SmsEventDedupeStore);
   });
+  afterAll(() => fetchSpy.mockRestore());
+  const text = () => send.mock.calls[0]?.[0][0]?.text ?? '';
 
-  it('일반 참가자: QR URL을 받아 일반 발신번호/문의번호로 문자를 보내고 발송 완료 이벤트를 발행한다', async () => {
+  it('1명 링크를 대표자 번호로 한 통 보내고 개인정보 없는 완료 이벤트를 발행한다', async () => {
     await service.handle(standard);
-
-    expect(attention.createQrImage).toHaveBeenCalledWith({
-      participationType: 'STANDARD',
-      id: 42,
-      phoneNumber: '01012345678',
-    });
-    expect(sender.send).toHaveBeenCalledWith([
+    expect(send).toHaveBeenCalledWith([
       {
-        to: '01012345678',
+        to: standard.phoneNumber,
         from: config.sms.fromStandardNumber,
-        text: '광주 박람회 현장 등록이 완료되었습니다.\n출입 QR코드 링크: https://s3.example/qr.jpg\n(문의) ☎062-380-4504',
+        text: text(),
       },
     ]);
-    expect(publisher.publish).toHaveBeenCalledWith({
+    expect(text()).toContain(
+      '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
+        'a'.repeat(22),
+    );
+    expect(text()).not.toContain(standard.phoneNumber);
+    expect(publish).toHaveBeenCalledWith({
       eventId: 'e1',
       expoId: 'expo-1',
       participationType: 'STANDARD',
       id: 42,
     });
-    expect(dedupe.markPublished).toHaveBeenCalledWith('e1');
+    expect(await redis.get('sms:event:e1')).toBe('done-v2');
   });
 
-  it('발송 완료 이벤트에 전화번호를 싣지 않는다 (개인정보 최소화)', async () => {
+  it('5명은 대표자를 먼저, 동행자는 이벤트 순서대로 이름/순번을 붙인다', async () => {
+    const ids = [42, 45, 43, 44, 46];
+    fetchSpy.mockResolvedValue(
+      Response.json(
+        ids.map((id) => ({ participantId: id, name: '가'.repeat(10) })),
+      ),
+    );
+    await service.handle({
+      ...standard,
+      id: 99,
+      representativeId: 42,
+      participants: [45, 43, 42, 44, 46].map((id) => ({
+        id,
+        code: 'b'.repeat(22),
+      })),
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(text().match(/id=\d+/g)).toEqual(ids.map((id) => 'id=' + id));
+    expect(text()).toContain('가'.repeat(10) + '(대표자):');
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ id: 42 }));
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://user.test/internal/standard-participants/names',
+      expect.objectContaining({
+        body: JSON.stringify({ expoId: 'expo-1', participantIds: ids }),
+      }),
+    );
+  });
+
+  it('새 동행자만 있는 목록에 대표자를 추가하지 않고 순번 fallback으로 보낸다', async () => {
+    fetchSpy.mockResolvedValue(new Response(null, { status: 404 }));
+    await service.handle({
+      ...standard,
+      participants: [
+        { id: 45, code: 'a'.repeat(22) },
+        { id: 43, code: 'b'.repeat(22) },
+      ],
+    });
+    expect(text()).toContain('동행자 1:');
+    expect(text()).toContain('동행자 2:');
+    expect(text()).not.toContain('대표자');
+    expect(text()).not.toContain('id=42');
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ id: 42 }));
+  });
+
+  it('이름 조회 실패는 대표자 라벨로 대체하고 발송을 계속한다', async () => {
+    fetchSpy.mockRejectedValue(new Error('private name/code/link'));
     await service.handle(standard);
-
-    const [event] = publisher.publish.mock.calls[0] as [
-      Record<string, unknown>,
-    ];
-    expect(Object.keys(event).sort()).toEqual([
-      'eventId',
-      'expoId',
-      'id',
-      'participationType',
-    ]);
+    expect(text()).toContain('대표자:');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 
-  it('연수자: 연수 발신번호/문의번호를 쓰고 이벤트는 발행하지 않는다', async () => {
-    await service.handle(trainee);
+  it.each([undefined, '', '   '])(
+    '템플릿 %s는 선점/발송/발행 없이 끝낸다',
+    async (template) => {
+      config.sms.qrUrlTemplate = template;
+      await service.handle(standard);
+      expect(send).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(await redis.get('sms:event:e1')).toBeNull();
+    },
+  );
 
-    const [[message]] = sender.send.mock.calls[0] as [
-      [{ from: string; text: string }],
-    ];
-    expect(message.from).toBe(config.sms.fromTraineeNumber);
-    expect(message.text).toContain('062-380-4587');
-    expect(publisher.publish).not.toHaveBeenCalled();
+  it.each([
+    { ...standard, participants: undefined },
+    { ...standard, participants: [{ id: 42 }] },
+  ])(
+    '구버전 STANDARD 이벤트는 성공 기록 없이 재시도 대상으로 실패한다',
+    async (event) => {
+      await expect(service.handle(event)).rejects.toBeInstanceOf(QrLinkError);
+      expect(send).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(await redis.get('sms:event:e1')).toBeNull();
+    },
+  );
+
+  it('잘못된 템플릿은 발송/발행 없이 실패하고 선점을 해제한다', async () => {
+    config.sms.qrUrlTemplate =
+      'https://expo.test/wrong?expoId={expoId}&type={participationType}&id={id}&code={code}';
+    await expect(service.handle(standard)).rejects.toBeInstanceOf(QrLinkError);
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    expect(await redis.get('sms:event:e1')).toBeNull();
   });
 
-  it('QR 생성이 실패하면 문자도 이벤트도 없이 선점을 풀고 던진다 (재전달)', async () => {
-    attention.createQrImage.mockRejectedValue(
-      new Error('attention responded 503'),
-    );
-
-    await expect(service.handle(standard)).rejects.toThrow(
-      'attention responded 503',
-    );
-    expect(sender.send).not.toHaveBeenCalled();
-    expect(dedupe.release).toHaveBeenCalledWith('e1');
-    expect(publisher.publish).not.toHaveBeenCalled();
+  it('한 통의 LMS 상한을 넘으면 분할하거나 성공 처리하지 않는다', async () => {
+    config.sms.expoName = '가'.repeat(1000);
+    await expect(service.handle(standard)).rejects.toThrow('single LMS');
+    expect(send).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+    expect(await redis.get('sms:event:e1')).toBeNull();
   });
 
-  it('문자 발송이 실패하면 이벤트를 발행하지 않고 던진다', async () => {
-    sender.send.mockResolvedValue({ total: 1, failedTo: ['01012345678'] });
+  it('TRAINEE는 기존 전화번호 QR 형식으로 보내고 이름 조회/완료 발행을 하지 않는다', async () => {
+    await service.handle({
+      ...standard,
+      participationType: 'TRAINEE',
+      participants: undefined,
+    });
+    expect(text()).toContain('type=TRAINEE&id=42&phoneNumber=01012345678');
+    expect(text()).not.toContain('code=');
+    expect(send.mock.calls[0]?.[0][0]?.from).toBe(config.sms.fromTraineeNumber);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
 
+  it('TRAINEE에 STANDARD 템플릿을 대신 쓰지 않는다', async () => {
+    config.sms.traineeQrUrlTemplate = undefined;
+    await service.handle({ ...standard, participationType: 'TRAINEE' });
+    expect(send).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('SMS 실패 후 재전달은 다시 보내며 성공 전에는 완료를 기록하지 않는다', async () => {
+    send.mockResolvedValueOnce({
+      failedMessageList: [{ to: standard.phoneNumber }],
+    });
     await expect(service.handle(standard)).rejects.toThrow(
       'qr sms delivery failed',
     );
-    expect(publisher.publish).not.toHaveBeenCalled();
-  });
-
-  it('발행이 실패하면 DLQ 횟수에 세지 않는 에러로 던지고 문자 완료 마커는 유지한다 (재전달 때 문자를 다시 보내지 않기 위해)', async () => {
-    publisher.publish.mockRejectedValue(new Error('broker down'));
-
-    const error = await service.handle(standard).catch((e: unknown) => e);
-
-    expect(error).toBeInstanceOf(SentEventPublishError);
-    expect((error as SentEventPublishError).countsTowardDeadLetter).toBe(false);
-    expect(dedupe.complete).toHaveBeenCalledWith('e1');
-    expect(dedupe.release).not.toHaveBeenCalled();
-    expect(dedupe.markPublished).not.toHaveBeenCalled();
-  });
-
-  it('재전달: 이미 문자를 보낸 이벤트는 문자 없이 발행만 다시 시도한다', async () => {
-    dedupe.claim.mockResolvedValue('done');
-
+    expect(publish).not.toHaveBeenCalled();
+    expect(await redis.get('sms:event:e1')).toBeNull();
     await service.handle(standard);
-
-    expect(attention.createQrImage).not.toHaveBeenCalled();
-    expect(sender.send).not.toHaveBeenCalled();
-    expect(publisher.publish).toHaveBeenCalledTimes(1);
-    expect(dedupe.markPublished).toHaveBeenCalledWith('e1');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 
-  it('이미 발행한 이벤트는 다시 발행하지 않는다', async () => {
-    dedupe.claim.mockResolvedValue('done');
-    dedupe.isPublished.mockResolvedValue(true);
+  it('게이트웨이 요청 예외도 선점을 풀고 발행하지 않는다', async () => {
+    send.mockRejectedValue(new Error('private gateway body'));
+    await expect(service.handle(standard)).rejects.toThrow(
+      'sms gateway request failed',
+    );
+    expect(await redis.get('sms:event:e1')).toBeNull();
+    expect(publish).not.toHaveBeenCalled();
+  });
 
+  it('발행 실패 후에는 문자를 다시 보내지 않고 DLQ 상한을 넘어 발행만 재시도한다', async () => {
+    publish.mockRejectedValue(new Error('broker down'));
+    for (let i = 0; i < config.sms.eventMaxAttempts + 2; i += 1) {
+      await expect(service.handle(standard)).rejects.toBeInstanceOf(
+        SentEventPublishError,
+      );
+    }
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(await redis.get('sms:event:e1')).toBe('done-v2');
+    publish.mockResolvedValue(undefined);
     await service.handle(standard);
-
-    expect(publisher.publish).not.toHaveBeenCalled();
+    expect(await redis.get('sms:event-published:e1')).toBe('1');
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('HTTP 방식에서 끝낸 이벤트는 문자도 완료 이벤트도 다시 보내지 않는다', async () => {
-    dedupe.claim.mockResolvedValue('legacy-done');
-
+  it('반복 eventId는 이름 조회/문자/완료 발행을 반복하지 않는다', async () => {
     await service.handle(standard);
-
-    expect(sender.send).not.toHaveBeenCalled();
-    expect(publisher.publish).not.toHaveBeenCalled();
+    await service.handle(standard);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 
-  it('다른 곳에서 처리 중이면 버리지 않고 던진다. 문자도 발행도 하지 않는다 (문자가 아직 안 나갔을 수 있음)', async () => {
-    dedupe.claim.mockResolvedValue('in-progress');
+  it('legacy done은 구버전 이벤트에도 문자와 완료 발행을 하지 않는다', async () => {
+    await redis.set('sms:event:e1', 'done');
+    await service.handle({ ...standard, participants: undefined });
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
+  });
 
+  it('done-v2 구버전 이벤트는 이미 보낸 문자 없이 완료 발행만 복구한다', async () => {
+    await redis.set('sms:event:e1', 'done-v2');
+    await service.handle({ ...standard, participants: undefined });
+    expect(send).not.toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('다른 인스턴스가 처리 중이면 재전달을 기다린다', async () => {
+    await redis.set('sms:event:e1', 'processing');
     await expect(service.handle(standard)).rejects.toBeInstanceOf(
       EventInProgressError,
     );
-    expect(sender.send).not.toHaveBeenCalled();
-    expect(publisher.publish).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
   });
 
-  it('발행 여부를 읽지 못해도 발행한다 (중복 발행은 User가 걸러 줌)', async () => {
-    dedupe.isPublished.mockRejectedValue(new Error('redis blip'));
-
-    await expect(service.handle(standard)).resolves.toBeUndefined();
-    expect(publisher.publish).toHaveBeenCalledTimes(1);
+  it('발행 여부 조회 장애에도 완료 이벤트 발행은 시도한다', async () => {
+    jest.spyOn(redis, 'exists').mockRejectedValue(new Error('redis down'));
+    await service.handle(standard);
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 
-  it('발행 뒤 발행 표시가 실패해도 던지지 않는다 (재전달로 인한 중복 발행만 생김)', async () => {
-    dedupe.markPublished.mockRejectedValue(new Error('redis blip'));
-
+  it('발행 표시 저장 장애는 이미 보낸 문자를 실패 처리하지 않는다', async () => {
+    jest
+      .spyOn(store, 'markPublished')
+      .mockRejectedValue(new Error('redis down'));
     await expect(service.handle(standard)).resolves.toBeUndefined();
-    expect(publisher.publish).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledTimes(1);
   });
 });
