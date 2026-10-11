@@ -9,6 +9,7 @@ import { KafkaModule } from './kafka/kafka.module';
 import { RedisModule } from './redis/redis.module';
 import { SmsModule } from './sms/sms.module';
 import { PromotionModule } from './promotion/promotion.module';
+import { AdminGroupMessageModule } from './admin-group-message/admin-group-message.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { PromotionModule } from './promotion/promotion.module';
     RedisModule,
     SmsModule,
     PromotionModule,
+    AdminGroupMessageModule,
     AlarmModule,
   ],
   controllers: [AppController],

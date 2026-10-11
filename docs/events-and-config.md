@@ -189,3 +189,8 @@ TRAINEE CUSTOM의 실제 Kafka/Redis 통합 테스트, 7일 완료 마커, DLQ �
 [Notification #20 계약](notification-20-contract.md)에 수신 JSON, 필요한 Application 검증 API,
 Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행기/API는 아직 연결되지 않았으며
 `promotion.enabled`는 기본 비활성이다. 기존 CUSTOM 이벤트로 승급 안내를 대체하지 않는다.
+
+관리자 그룹 발송의 내부 HTTP payload, 상태 전이, 중복/timeout 처리와 Kakao 승인 template 설정은
+[Notification #10 계약](notification-10-admin-group-messaging.md)에 기록한다. 기능은
+`adminGroupMessaging.enabled`가 true이고 32자 이상의 `internalToken`이 설정된 환경에서만 발송한다.
+Kakao 설정이 없으면 SMS만 사용할 수 있으며 Kakao의 SMS 자동 대체는 꺼져 있다.
