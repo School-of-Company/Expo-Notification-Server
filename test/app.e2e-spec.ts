@@ -292,7 +292,7 @@ describe('Notification server (e2e)', () => {
     });
   });
 
-  describe('QR·설문 문자 (Kafka → User 이름 조회)', () => {
+  describe('QR 문자 (Kafka → User 이름 조회)', () => {
     const registered = {
       eventId: 'reg-1',
       expoId: 'expo-1',
@@ -302,7 +302,6 @@ describe('Notification server (e2e)', () => {
       participants: [{ id: 42, code: 'a'.repeat(22) }],
     };
     const registeredGroup = `${config.kafka.smsGroupId}.participant-registered`;
-    const entryGroup = `${config.kafka.smsGroupId}.entry-recorded`;
     const callsTo = (suffix: string) =>
       (fetchSpy.mock.calls as [FetchInput, RequestInit?][]).filter(([url]) =>
         urlOf(url).endsWith(suffix),
@@ -492,12 +491,15 @@ describe('Notification server (e2e)', () => {
       expect(solapiSend).toHaveBeenCalledTimes(1);
     });
 
-    it('입장 이벤트: 일반 참가자에게 설문 링크 문자를 보낸다', async () => {
-      await emit(entryGroup, { ...registered, eventId: 'entry-1' });
-
-      const { text, from } = sentBatches()[0][0][0];
-      expect(from).toBe(config.sms.fromStandardNumber);
-      expect(text).toContain('https://survey.test/expo/expo-1');
+    it('입장 설문 문자 consumer를 시작하지 않는다', () => {
+      expect([...handlers.keys()].sort()).toEqual(
+        [
+          config.kafka.smsGroupId,
+          registeredGroup,
+          config.kafka.alarmGroupId,
+        ].sort(),
+      );
+      expect(solapiSend).not.toHaveBeenCalled();
     });
   });
 

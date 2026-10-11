@@ -39,10 +39,3 @@ export function renderQrSms(params: {
   }
   return lines.join('\n');
 }
-
-export function renderSurveySms(params: {
-  expoName: string;
-  surveyUrl: string;
-}): string {
-  return `${params.expoName} 설문조사\n${params.expoName}을 방문해주셔서 감사합니다. 체험 후 꼭 설문에 응답해주세요.\n${params.surveyUrl}`;
-}

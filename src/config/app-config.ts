@@ -29,7 +29,6 @@ export const appConfigSchema = z.object({
           .string()
           .min(1)
           .default('user.participant.registered'),
-        entryRecorded: z.string().min(1).default('attention.entry.recorded'),
         smsDeadLetter: z
           .string()
           .min(1)
@@ -58,7 +57,6 @@ export const appConfigSchema = z.object({
     expoName: z.string().min(1).default('박람회'),
     contactStandardNumber: z.string().min(1).optional(),
     contactTraineeNumber: z.string().min(1).optional(),
-    surveyUrlTemplate: z.string().min(1).optional(),
     qrUrlTemplate: z.string().trim().optional(),
     traineeQrUrlTemplate: z.string().trim().optional(),
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),

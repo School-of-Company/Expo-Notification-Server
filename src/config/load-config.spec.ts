@@ -75,22 +75,18 @@ describe('loadConfig', () => {
     await expect(promise).rejects.not.toThrow(/short-secret/);
   });
 
-  it('SMS 관련 선택 설정(행사명, 문의 번호, 설문 URL 템플릿)을 읽는다', async () => {
+  it('SMS 관련 선택 설정(행사명, 문의 번호)을 읽는다', async () => {
     const config = await loadConfig(
       {
         ...baseEnv,
         SMS_EXPO_NAME: '광주 박람회',
         SMS_CONTACT_STANDARD_NUMBER: '062-380-4504',
-        SMS_SURVEY_URL_TEMPLATE: 'https://survey.example/{expoId}',
       },
       jest.fn(),
     );
 
     expect(config.sms.expoName).toBe('광주 박람회');
     expect(config.sms.contactStandardNumber).toBe('062-380-4504');
-    expect(config.sms.surveyUrlTemplate).toBe(
-      'https://survey.example/{expoId}',
-    );
     expect(config.sms.contactTraineeNumber).toBeUndefined();
   });
 

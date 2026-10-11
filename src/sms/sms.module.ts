@@ -3,7 +3,6 @@ import { SolapiMessageService } from 'solapi';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { ParticipantNamesProvider } from './participant-names.provider';
-import { EntryRecordedConsumer } from './entry-recorded.consumer';
 import { ParticipantRegisteredConsumer } from './participant-registered.consumer';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { QrSmsService } from './qr-sms.service';
@@ -16,7 +15,6 @@ import { SmsEventService } from './sms-event.service';
 import { SmsSenderProvider } from './sms-sender.provider';
 import { SOLAPI_CLIENT } from './sms.constants';
 import { SmsController } from './sms.controller';
-import { SurveySmsService } from './survey-sms.service';
 
 @Module({
   controllers: [SmsController],
@@ -36,10 +34,8 @@ import { SurveySmsService } from './survey-sms.service';
     ParticipantNamesProvider,
     QrSmsSentPublisher,
     QrSmsService,
-    SurveySmsService,
     SmsEventConsumer,
     ParticipantRegisteredConsumer,
-    EntryRecordedConsumer,
   ],
 })
 export class SmsModule {}

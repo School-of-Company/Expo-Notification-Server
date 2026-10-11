@@ -1,7 +1,4 @@
-import {
-  entryRecordedSchema,
-  participantRegisteredSchema,
-} from './participant-event.schema';
+import { participantRegisteredSchema } from './participant-event.schema';
 
 const valid = {
   eventId: 'e1',
@@ -96,11 +93,5 @@ describe('participantRegisteredSchema', () => {
         participants: [{ id: 42, code: 'a'.repeat(22), name: 'Kafka이름' }],
       }).participants,
     ).toEqual([{ id: 42, code: 'a'.repeat(22) }]);
-  });
-});
-
-describe('entryRecordedSchema', () => {
-  it('같은 형태의 입장 이벤트를 받는다', () => {
-    expect(entryRecordedSchema.safeParse(valid).success).toBe(true);
   });
 });

@@ -1,10 +1,8 @@
 import { EachMessageHandler } from 'kafkajs';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
-import { EntryRecordedConsumer } from './entry-recorded.consumer';
 import { ParticipantRegisteredConsumer } from './participant-registered.consumer';
 import { QrSmsService } from './qr-sms.service';
 import { SmsEventGuard } from './sms-event.guard';
-import { SurveySmsService } from './survey-sms.service';
 
 const config = createAppConfig();
 
@@ -91,61 +89,5 @@ describe('ParticipantRegisteredConsumer', () => {
     await emit({ ...event, phoneNumber: 'bad' });
 
     expect(qrSms.handle).not.toHaveBeenCalled();
-  });
-});
-
-describe('EntryRecordedConsumer', () => {
-  it('Attention 입장 토픽을 전용 그룹으로 구독하고 설문 문자 서비스로 넘긴다', async () => {
-    const { kafka, client, emit } = fakeKafka();
-    const survey = { handle: jest.fn() };
-    await new EntryRecordedConsumer(
-      kafka as never,
-      config,
-      guard as unknown as SmsEventGuard,
-      survey as unknown as SurveySmsService,
-    ).onApplicationBootstrap();
-
-    expect(kafka.consumer).toHaveBeenCalledWith({
-      groupId: 'expo-notification-server.sms.entry-recorded',
-    });
-    expect(client.subscribe).toHaveBeenCalledWith({
-      topic: 'attention.entry.recorded',
-      fromBeginning: false,
-    });
-
-    await emit(event);
-
-    expect(survey.handle).toHaveBeenCalledWith({
-      ...event,
-      phoneNumber: '01012345678',
-    });
-  });
-
-  it('재시도 상한에 도달하면 원본을 출처 토픽 헤더와 함께 DLQ로 보낸다', async () => {
-    const { kafka, producer, emit } = fakeKafka();
-    const survey = {
-      handle: jest.fn().mockRejectedValue(new Error('gateway down')),
-    };
-    const exhausted = {
-      recordFailure: jest.fn().mockResolvedValue(config.sms.eventMaxAttempts),
-      clearFailures: jest.fn().mockResolvedValue(undefined),
-    };
-    await new EntryRecordedConsumer(
-      kafka as never,
-      config,
-      exhausted as unknown as SmsEventGuard,
-      survey as unknown as SurveySmsService,
-    ).onApplicationBootstrap();
-
-    await expect(emit(event)).resolves.toBeUndefined();
-
-    expect(producer.send).toHaveBeenCalledWith({
-      topic: 'notification.sms.requested.dlq',
-      messages: [
-        expect.objectContaining({
-          headers: { 'x-source-topic': 'attention.entry.recorded' },
-        }),
-      ],
-    });
   });
 });

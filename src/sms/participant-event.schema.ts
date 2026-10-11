@@ -43,7 +43,3 @@ export const participantRegisteredSchema = participantEvent.extend({
 export type ParticipantRegisteredEvent = z.infer<
   typeof participantRegisteredSchema
 >;
-
-/** Attention 서비스가 일반 참가자 입장 때 아웃박스로 발행한다. */
-export const entryRecordedSchema = participantEvent;
-export type EntryRecordedEvent = z.infer<typeof entryRecordedSchema>;
