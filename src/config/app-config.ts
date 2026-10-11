@@ -24,6 +24,7 @@ export const appConfigSchema = z.object({
     topics: z
       .object({
         smsRequested: z.string().min(1).default('notification.sms.requested'),
+        qrSmsSent: z.string().min(1).default('notification.qr-sms.sent'),
         participantRegistered: z
           .string()
           .min(1)
@@ -61,7 +62,6 @@ export const appConfigSchema = z.object({
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
   }),
   attention: serviceClient,
-  user: serviceClient,
   eureka: z
     .object({
       serviceUrl: z.union([z.string().min(1), z.array(z.string().min(1))]),

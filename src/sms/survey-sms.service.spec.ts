@@ -30,7 +30,7 @@ describe('SurveySmsService', () => {
 
   beforeEach(() => {
     dedupe = {
-      claim: jest.fn().mockResolvedValue(true),
+      claim: jest.fn().mockResolvedValue('claimed'),
       complete: jest.fn(),
       release: jest.fn().mockResolvedValue(undefined),
     };
@@ -64,7 +64,7 @@ describe('SurveySmsService', () => {
   });
 
   it('이미 처리한 eventId는 보내지 않는다', async () => {
-    dedupe.claim.mockResolvedValue(false);
+    dedupe.claim.mockResolvedValue('done');
 
     await create().handle(entry);
 

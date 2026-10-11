@@ -11,6 +11,7 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       topics: {
         smsRequested: 'notification.sms.requested',
         smsDeadLetter: 'notification.sms.requested.dlq',
+        qrSmsSent: 'notification.qr-sms.sent',
         participantRegistered: 'user.participant.registered',
         entryRecorded: 'attention.entry.recorded',
         expoApplicantCount: 'expo.applicant-count.updated',
@@ -36,7 +37,6 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       baseUrl: 'http://attention.test',
       internalToken: 'a'.repeat(32),
     },
-    user: { baseUrl: 'http://user.test', internalToken: 'u'.repeat(32) },
     discord: { participantNumberUrl: 'https://discord.test/webhook' },
     ...overrides,
   };

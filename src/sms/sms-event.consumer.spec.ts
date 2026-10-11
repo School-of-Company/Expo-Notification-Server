@@ -1,6 +1,7 @@
 import { EachMessageHandler } from 'kafkajs';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import { SmsEventConsumer } from './sms-event.consumer';
+import { EventInProgressError, SentEventPublishError } from './sms-errors';
 import { SmsEventGuard } from './sms-event.guard';
 import { SmsEventService } from './sms-event.service';
 
@@ -15,9 +16,12 @@ const drawResult = {
 const toMessage = (payload: unknown) =>
   ({
     message: {
+      offset: '12',
       key: Buffer.from('k'),
       value: Buffer.from(JSON.stringify(payload)),
     },
+    topic: 'notification.sms.requested',
+    partition: 0,
   }) as never;
 
 describe('SmsEventConsumer', () => {
@@ -27,11 +31,12 @@ describe('SmsEventConsumer', () => {
     subscribe: jest.Mock;
     run: jest.Mock;
     disconnect: jest.Mock;
+    commitOffsets: jest.Mock;
   };
   let producer: { connect: jest.Mock; send: jest.Mock; disconnect: jest.Mock };
   let kafka: { consumer: jest.Mock; producer: jest.Mock };
   let service: { handle: jest.Mock };
-  let guard: { recordFailure: jest.Mock };
+  let guard: { recordFailure: jest.Mock; clearFailures: jest.Mock };
   let eachMessage: EachMessageHandler;
   let consumer: SmsEventConsumer;
 
@@ -43,6 +48,7 @@ describe('SmsEventConsumer', () => {
         eachMessage = options.eachMessage;
       }),
       disconnect: jest.fn(),
+      commitOffsets: jest.fn(),
     };
     producer = { connect: jest.fn(), send: jest.fn(), disconnect: jest.fn() };
     kafka = {
@@ -50,14 +56,17 @@ describe('SmsEventConsumer', () => {
       producer: jest.fn().mockReturnValue(producer),
     };
     service = { handle: jest.fn() };
-    guard = { recordFailure: jest.fn().mockResolvedValue(1) };
+    guard = {
+      recordFailure: jest.fn().mockResolvedValue(1),
+      clearFailures: jest.fn().mockResolvedValue(undefined),
+    };
     consumer = new SmsEventConsumer(
       kafka as never,
       config,
       guard as unknown as SmsEventGuard,
       service as unknown as SmsEventService,
     );
-    await consumer.onModuleInit();
+    await consumer.onApplicationBootstrap();
   });
 
   it('설정된 그룹/토픽으로 구독한다', () => {
@@ -74,6 +83,27 @@ describe('SmsEventConsumer', () => {
     await eachMessage(toMessage(drawResult));
 
     expect(service.handle).toHaveBeenCalledWith(drawResult);
+    expect(guard.recordFailure).not.toHaveBeenCalled();
+  });
+
+  it('처리 전에 현재 오프셋을 저장한다 (실패한 첫 메시지가 재시작 때 유실되지 않게)', async () => {
+    await eachMessage(toMessage(drawResult));
+
+    expect(client.commitOffsets).toHaveBeenCalledWith([
+      { topic: 'notification.sms.requested', partition: 0, offset: '12' },
+    ]);
+    expect(client.commitOffsets.mock.invocationCallOrder[0]).toBeLessThan(
+      service.handle.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('현재 위치를 저장하지 못하면 문자를 처리하지 않고 재시도한다', async () => {
+    client.commitOffsets.mockRejectedValue(new Error('broker down'));
+
+    await expect(eachMessage(toMessage(drawResult))).rejects.toThrow(
+      'broker down',
+    );
+    expect(service.handle).not.toHaveBeenCalled();
     expect(guard.recordFailure).not.toHaveBeenCalled();
   });
 
@@ -119,6 +149,38 @@ describe('SmsEventConsumer', () => {
       ],
     });
   });
+
+  it('DLQ로 보낼 때 실패 카운터를 지운다 (DLQ 재처리가 곧바로 다시 DLQ로 가지 않게)', async () => {
+    service.handle.mockRejectedValue(new Error('insufficient balance'));
+    guard.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts);
+
+    await eachMessage(toMessage(drawResult));
+
+    expect(guard.clearFailures).toHaveBeenCalledWith('e1');
+  });
+
+  it('DLQ 전송이 성공하면 실패 카운터 정리 오류로 원본을 재전달하지 않는다', async () => {
+    service.handle.mockRejectedValue(new Error('gateway down'));
+    guard.recordFailure.mockResolvedValue(config.sms.eventMaxAttempts);
+    guard.clearFailures.mockRejectedValue(new Error('redis down'));
+
+    await expect(eachMessage(toMessage(drawResult))).resolves.toBeUndefined();
+    expect(producer.send).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['발행 실패', new SentEventPublishError('publish failed')],
+    ['처리 중 대기', new EventInProgressError('in progress')],
+  ])(
+    '%s는 실패 횟수에 세지 않고 던진다 (DLQ로 보내면 이벤트가 사라짐)',
+    async (_name, error) => {
+      service.handle.mockRejectedValue(error);
+
+      await expect(eachMessage(toMessage(drawResult))).rejects.toBe(error);
+      expect(guard.recordFailure).not.toHaveBeenCalled();
+      expect(producer.send).not.toHaveBeenCalled();
+    },
+  );
 
   it('DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다', async () => {
     service.handle.mockRejectedValue(new Error('insufficient balance'));

@@ -5,6 +5,7 @@ import { APP_CONFIG } from '../config/app-config.constants';
 import { AttentionClientProvider } from './attention-client.provider';
 import { EntryRecordedConsumer } from './entry-recorded.consumer';
 import { ParticipantRegisteredConsumer } from './participant-registered.consumer';
+import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { QrSmsService } from './qr-sms.service';
 import { SmsAuthService } from './sms-auth.service';
 import { SmsAuthStore } from './sms-auth.store';
@@ -16,7 +17,6 @@ import { SmsSenderProvider } from './sms-sender.provider';
 import { SOLAPI_CLIENT } from './sms.constants';
 import { SmsController } from './sms.controller';
 import { SurveySmsService } from './survey-sms.service';
-import { UserClientProvider } from './user-client.provider';
 
 @Module({
   controllers: [SmsController],
@@ -34,7 +34,7 @@ import { UserClientProvider } from './user-client.provider';
     SmsEventService,
     SmsEventGuard,
     AttentionClientProvider,
-    UserClientProvider,
+    QrSmsSentPublisher,
     QrSmsService,
     SurveySmsService,
     SmsEventConsumer,

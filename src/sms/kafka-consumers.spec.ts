@@ -17,6 +17,7 @@ function fakeKafka() {
       eachMessage = options.eachMessage;
     }),
     disconnect: jest.fn(),
+    commitOffsets: jest.fn(),
   };
   const producer = {
     connect: jest.fn(),
@@ -45,7 +46,10 @@ const event = {
   id: 42,
   phoneNumber: '010-1234-5678',
 };
-const guard = { recordFailure: jest.fn().mockResolvedValue(1) };
+const guard = {
+  recordFailure: jest.fn().mockResolvedValue(1),
+  clearFailures: jest.fn().mockResolvedValue(undefined),
+};
 
 describe('ParticipantRegisteredConsumer', () => {
   it('User 등록 완료 토픽을 전용 그룹으로 구독하고, 정규화한 이벤트를 QR 문자 서비스로 넘긴다', async () => {
@@ -56,7 +60,7 @@ describe('ParticipantRegisteredConsumer', () => {
       config,
       guard as unknown as SmsEventGuard,
       qrSms as unknown as QrSmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     expect(kafka.consumer).toHaveBeenCalledWith({
       groupId: 'expo-notification-server.sms.participant-registered',
@@ -82,7 +86,7 @@ describe('ParticipantRegisteredConsumer', () => {
       config,
       guard as unknown as SmsEventGuard,
       qrSms as unknown as QrSmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     await emit({ ...event, phoneNumber: 'bad' });
 
@@ -99,7 +103,7 @@ describe('EntryRecordedConsumer', () => {
       config,
       guard as unknown as SmsEventGuard,
       survey as unknown as SurveySmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     expect(kafka.consumer).toHaveBeenCalledWith({
       groupId: 'expo-notification-server.sms.entry-recorded',
@@ -124,13 +128,14 @@ describe('EntryRecordedConsumer', () => {
     };
     const exhausted = {
       recordFailure: jest.fn().mockResolvedValue(config.sms.eventMaxAttempts),
+      clearFailures: jest.fn().mockResolvedValue(undefined),
     };
     await new EntryRecordedConsumer(
       kafka as never,
       config,
       exhausted as unknown as SmsEventGuard,
       survey as unknown as SurveySmsService,
-    ).onModuleInit();
+    ).onApplicationBootstrap();
 
     await expect(emit(event)).resolves.toBeUndefined();
 
