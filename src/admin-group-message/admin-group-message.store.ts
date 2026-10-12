@@ -1,34 +1,39 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import {
-  groupMessageJobSchema,
-  groupMessagePreviewRecordSchema,
   GroupMessageRetryError,
+  parseGroupMessageJob,
+  parseGroupMessagePreviewRecord,
   type CreateGroupMessagePreview,
   type GroupMessageJob,
   type GroupMessagePreviewRecord,
 } from './admin-group-message.schema';
+import {
+  groupMessageHistoryMutation,
+  groupMessageTerminalHistoryType,
+} from './admin-group-message-history.store';
+import {
+  createGroupMessageJobLua,
+  groupMessageJobId,
+  groupMessageJobKey as jobKey,
+  groupMessageLockKey as lockKey,
+  groupMessageQueueKey as queueKey,
+  groupMessageRetryOperationKey as retryOperationKey,
+  remainingGroupMessageJobTtl,
+  saveGroupMessageJobLua,
+  saveGroupMessageRetryLua,
+} from './admin-group-message-job.scripts';
 
-const queueKey = 'admin-group-message:{jobs}:due';
 const previewKey = (id: string) => `admin-group-message:{jobs}:preview:${id}`;
 const previewRequestKey = (id: string) =>
   `admin-group-message:{jobs}:preview-request:${id}`;
 const previewTombstoneKey = (id: string) =>
   `admin-group-message:{jobs}:preview-tombstone:${id}`;
-const jobKey = (id: string) => `admin-group-message:{jobs}:job:${id}`;
-const lockKey = (id: string) => `admin-group-message:{jobs}:lock:${id}`;
-const retryOperationKey = (id: string, operationId: string) =>
-  `admin-group-message:{jobs}:retry:${id}:${operationId}`;
-
-export function groupMessageJobId(previewId: string): string {
-  return createHash('sha256')
-    .update(`admin-group-message:${previewId}`)
-    .digest('hex');
-}
+export { groupMessageJobId };
 
 @Injectable()
 export class AdminGroupMessageStore {
@@ -52,7 +57,7 @@ export class AdminGroupMessageStore {
         now.getTime() + settings.previewTtlSeconds * 1000,
       ).toISOString(),
     };
-    const result = await this.redis.eval(
+    const result = await this.eval(
       `
       local existing = redis.call('GET', KEYS[2])
       if existing then return existing end
@@ -75,8 +80,7 @@ export class AdminGroupMessageStore {
   async getPreview(id: string): Promise<GroupMessagePreviewRecord | null> {
     const raw = await this.redis.get(previewKey(id));
     if (!raw) return null;
-    const body: unknown = JSON.parse(raw);
-    return groupMessagePreviewRecordSchema.parse(body);
+    return parseGroupMessagePreviewRecord(raw);
   }
 
   async isKnownPreview(id: string): Promise<boolean> {
@@ -95,6 +99,7 @@ export class AdminGroupMessageStore {
       previewId: preview.previewId,
       requesterUserId: preview.requesterUserId,
       expoId: preview.expoId,
+      applicationCount: preview.applicationCount,
       targetFingerprint: preview.targetFingerprint,
       channel: preview.channel,
       templateId: preview.templateId,
@@ -108,20 +113,24 @@ export class AdminGroupMessageStore {
         status: target.missingReason ? 'MISSING' : 'PENDING',
       })),
     };
-    await this.redis.eval(
-      `
-      if redis.call('EXISTS', KEYS[1]) == 0 then
-        redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
-        redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
-      end
-      return 1`,
-      2,
+    const history = groupMessageHistoryMutation(
+      job,
+      'REQUESTED',
+      settings.retentionSeconds,
+    );
+    await this.eval(
+      createGroupMessageJobLua,
+      6,
+      jobKey(jobId),
       jobKey(jobId),
       queueKey,
+      ...history.keys,
+      '',
       JSON.stringify(job),
       settings.retentionSeconds,
       Date.now(),
       jobId,
+      ...history.arguments,
     );
     const saved = await this.getJob(jobId);
     if (!saved) throw new GroupMessageRetryError();
@@ -131,8 +140,7 @@ export class AdminGroupMessageStore {
   async getJob(id: string): Promise<GroupMessageJob | null> {
     const raw = await this.redis.get(jobKey(id));
     if (!raw) return null;
-    const body: unknown = JSON.parse(raw);
-    return groupMessageJobSchema.parse(body);
+    return parseGroupMessageJob(raw);
   }
 
   getJobForPreview(previewId: string): Promise<GroupMessageJob | null> {
@@ -141,9 +149,13 @@ export class AdminGroupMessageStore {
 
   async claim(id: string): Promise<string | null> {
     const token = randomUUID();
-    return (await this.redis.set(lockKey(id), token, 'EX', 30, 'NX')) === 'OK'
-      ? token
-      : null;
+    try {
+      return (await this.redis.set(lockKey(id), token, 'EX', 30, 'NX')) === 'OK'
+        ? token
+        : null;
+    } catch {
+      throw new GroupMessageRetryError();
+    }
   }
 
   async save(
@@ -154,22 +166,26 @@ export class AdminGroupMessageStore {
     const settings = this.config.adminGroupMessaging;
     if (!settings) throw new GroupMessageRetryError();
     const due = dueAt ?? this.nextDue(job);
-    const result = await this.redis.eval(
-      `
-      if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
-      redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-      if ARGV[4] == '0' then redis.call('ZREM', KEYS[3], ARGV[5])
-      else redis.call('ZADD', KEYS[3], ARGV[4], ARGV[5]) end
-      return 1`,
-      3,
+    const historyType = groupMessageTerminalHistoryType(job);
+    const history = groupMessageHistoryMutation(
+      job,
+      historyType ?? 'SENT',
+      settings.retentionSeconds,
+    );
+    const result = await this.eval(
+      saveGroupMessageJobLua,
+      6,
       jobKey(job.jobId),
       lockKey(job.jobId),
       queueKey,
+      ...history.keys,
       token,
       JSON.stringify(job),
-      this.remainingJobTtl(job, settings.retentionSeconds),
+      remainingGroupMessageJobTtl(job, settings.retentionSeconds),
       due,
       job.jobId,
+      ...history.arguments.slice(0, 3),
+      historyType ?? '',
     );
     if (result !== 1) throw new GroupMessageRetryError();
   }
@@ -181,31 +197,32 @@ export class AdminGroupMessageStore {
   ): Promise<boolean> {
     const settings = this.config.adminGroupMessaging;
     if (!settings) throw new GroupMessageRetryError();
-    const result = await this.redis.eval(
-      `
-      if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
-      if redis.call('EXISTS', KEYS[4]) == 1 then return 2 end
-      redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-      redis.call('SET', KEYS[4], '1', 'EX', ARGV[3])
-      redis.call('ZADD', KEYS[3], ARGV[4], ARGV[5])
-      return 1`,
-      4,
+    const history = groupMessageHistoryMutation(
+      job,
+      'RETRIED',
+      settings.retentionSeconds,
+    );
+    const result = await this.eval(
+      saveGroupMessageRetryLua,
+      7,
       jobKey(job.jobId),
       lockKey(job.jobId),
       queueKey,
+      ...history.keys,
       retryOperationKey(job.jobId, operationId),
       token,
       JSON.stringify(job),
-      this.remainingJobTtl(job, settings.retentionSeconds),
+      remainingGroupMessageJobTtl(job, settings.retentionSeconds),
       Date.now(),
       job.jobId,
+      ...history.arguments,
     );
     if (result === 0) throw new GroupMessageRetryError();
     return result === 1;
   }
 
   async release(id: string, token: string): Promise<void> {
-    await this.redis.eval(
+    await this.eval(
       `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`,
       1,
       lockKey(id),
@@ -221,6 +238,18 @@ export class AdminGroupMessageStore {
     await this.redis.zrem(queueKey, id);
   }
 
+  private async eval(
+    script: string,
+    numberOfKeys: number,
+    ...args: Array<string | number>
+  ): Promise<unknown> {
+    try {
+      return await this.redis.eval(script, numberOfKeys, ...args);
+    } catch {
+      throw new GroupMessageRetryError();
+    }
+  }
+
   private nextDue(job: GroupMessageJob): number {
     if (
       job.targets.some(
@@ -231,13 +260,5 @@ export class AdminGroupMessageStore {
     if (job.targets.some((target) => target.status === 'ACCEPTED'))
       return Date.now() + 30_000;
     return 0;
-  }
-
-  private remainingJobTtl(
-    job: GroupMessageJob,
-    retentionSeconds: number,
-  ): number {
-    const expiresAt = Date.parse(job.createdAt) + retentionSeconds * 1000;
-    return Math.max(1, Math.ceil((expiresAt - Date.now()) / 1000));
   }
 }

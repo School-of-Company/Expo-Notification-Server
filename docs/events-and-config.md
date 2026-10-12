@@ -139,6 +139,8 @@ DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고
 
 ## 설정 키 (config-server `notification-{profile}.yml` + Vault `secret/notification`)
 
+메트릭 listener, 신규 환경 변수, Eureka 등록 및 배포 후 확인 조건은 [metrics.md](metrics.md)를 참고합니다.
+
 서비스 식별자는 `notification` (`CONFIG_SERVICE_NAME`으로 변경 가능). 조회 경로: `GET {CONFIG_SERVER_URL}/configs/notification/{profile}`.
 config-server 값이 env 값보다 우선하고, config-server 호출이 실패하면 부팅을 실패시킨다.
 config-server가 인증을 켜면(Expo-Config-Server#54) `CONFIG_SERVER_PASSWORD`를 env로 준다. Basic 인증으로 보내며
@@ -147,6 +149,10 @@ config-server가 인증을 켜면(Expo-Config-Server#54) `CONFIG_SERVER_PASSWORD
 
 ```yaml
 port: 3000
+metrics:
+  enabled: true
+  port: 9464
+  host: 127.0.0.1
 kafka:
   brokers: ["<KAFKA_HOST>:9092"]      # 문자열 "a:9092,b:9092"도 허용
   clientId: expo-notification-server
@@ -197,3 +203,5 @@ Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행
 [Notification #10 계약](notification-10-admin-group-messaging.md)에 기록한다. 기능은
 `adminGroupMessaging.enabled`가 true이고 32자 이상의 `internalToken`이 설정된 환경에서만 발송한다.
 Kakao 설정이 없으면 SMS만 사용할 수 있으며 Kakao의 SMS 자동 대체는 꺼져 있다.
+행사별 문자 처리이력의 기간·유형·커서 페이지, 기존 `retentionSeconds` 사용과 Application 권한 접합은
+[Notification #42 계약](notification-42-admin-message-history.md)에 기록한다. 추가 env/config는 없다.
