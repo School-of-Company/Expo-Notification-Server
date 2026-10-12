@@ -6,8 +6,13 @@ import { setupSwagger } from './swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.enableShutdownHooks();
-  setupSwagger(app);
-  await app.listen(app.get<AppConfig>(APP_CONFIG).port);
+  try {
+    app.enableShutdownHooks();
+    setupSwagger(app);
+    await app.listen(app.get<AppConfig>(APP_CONFIG).port);
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
 }
 void bootstrap();

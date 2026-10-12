@@ -139,6 +139,8 @@ DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고
 
 ## 설정 키 (config-server `notification-{profile}.yml` + Vault `secret/notification`)
 
+메트릭 listener, 신규 환경 변수, Eureka 등록 및 배포 후 확인 조건은 [metrics.md](metrics.md)를 참고합니다.
+
 서비스 식별자는 `notification` (`CONFIG_SERVICE_NAME`으로 변경 가능). 조회 경로: `GET {CONFIG_SERVER_URL}/configs/notification/{profile}`.
 config-server 값이 env 값보다 우선하고, config-server 호출이 실패하면 부팅을 실패시킨다.
 config-server가 인증을 켜면(Expo-Config-Server#54) `CONFIG_SERVER_PASSWORD`를 env로 준다. Basic 인증으로 보내며
@@ -147,6 +149,10 @@ config-server가 인증을 켜면(Expo-Config-Server#54) `CONFIG_SERVER_PASSWORD
 
 ```yaml
 port: 3000
+metrics:
+  enabled: true
+  port: 9464
+  host: 127.0.0.1
 kafka:
   brokers: ["<KAFKA_HOST>:9092"]      # 문자열 "a:9092,b:9092"도 허용
   clientId: expo-notification-server

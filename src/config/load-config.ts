@@ -43,6 +43,11 @@ function eurekaFromEnv(env: Env): Record<string, unknown> {
 function configFromEnv(env: Env): Record<string, unknown> {
   return {
     ...pickDefined({ port: env.PORT }),
+    metrics: pickDefined({
+      enabled: env.METRICS_ENABLED,
+      port: env.METRICS_PORT,
+      host: env.METRICS_HOST,
+    }),
     swagger: pickDefined({
       enabled: env.SWAGGER_ENABLED,
       includeInternal: env.SWAGGER_INCLUDE_INTERNAL,

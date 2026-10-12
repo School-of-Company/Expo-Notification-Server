@@ -35,8 +35,18 @@ const kakaoVariableMapping = z
   })
   .strict();
 
-export const appConfigSchema = z.object({
+const baseAppConfigSchema = z.object({
   port: z.coerce.number().int().positive().default(3000),
+  metrics: z
+    .object({
+      enabled: z
+        .stringbool({ truthy: ['true'], falsy: ['false'] })
+        .or(z.boolean())
+        .default(true),
+      port: z.coerce.number().int().min(0).max(65535).default(9464),
+      host: z.union([z.ipv4(), z.ipv6()]).default('127.0.0.1'),
+    })
+    .prefault({}),
   swagger: z
     .object({
       enabled: z
@@ -214,5 +224,13 @@ export const appConfigSchema = z.object({
     })
     .prefault({}),
 });
+
+export const appConfigSchema = baseAppConfigSchema.refine(
+  (config) => !config.metrics.enabled || config.metrics.port !== config.port,
+  {
+    path: ['metrics', 'port'],
+    message: 'metrics port must differ from service port',
+  },
+);
 
 export type AppConfig = z.infer<typeof appConfigSchema>;

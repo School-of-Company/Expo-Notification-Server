@@ -1,23 +1,50 @@
-import { Module } from '@nestjs/common';
+import { Inject, Injectable, Module } from '@nestjs/common';
+import type {
+  BeforeApplicationShutdown,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { EurekaService } from '@school-of-company/nestjs-eureka';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { buildEurekaOptions } from './eureka-options.factory';
+import { MetricsModule } from '../metrics/metrics.module';
+import { MetricsProvider } from '../metrics/metrics.provider';
 
-/**
- * `eureka.serviceUrl`이 설정되어 있을 때만 Eureka에 등록한다 (로컬 개발은 비워 두면 된다).
- * 설정 값은 config 서버에서 비동기로 받아오므로 정적 `EurekaModule.forRoot` 대신 팩토리에서 결정한다.
- */
+@Injectable()
+class EurekaRegistrationProvider
+  implements OnApplicationBootstrap, BeforeApplicationShutdown
+{
+  private service?: EurekaService;
+
+  constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(MetricsProvider) private readonly metrics: MetricsProvider,
+  ) {}
+
+  async onApplicationBootstrap(): Promise<void> {
+    // Nest completes all onModuleInit hooks (including listener bind) first.
+    const options = buildEurekaOptions(
+      this.config,
+      undefined,
+      this.metrics.address,
+    );
+    if (!options) return;
+    this.service = new EurekaService(options);
+    try {
+      await this.service.onApplicationBootstrap();
+    } catch (error) {
+      await this.metrics.onApplicationShutdown();
+      throw error;
+    }
+  }
+
+  async beforeApplicationShutdown(): Promise<void> {
+    await this.service?.beforeApplicationShutdown();
+  }
+}
+
 @Module({
-  providers: [
-    {
-      provide: EurekaService,
-      inject: [APP_CONFIG],
-      useFactory: (config: AppConfig) => {
-        const options = buildEurekaOptions(config);
-        return options ? new EurekaService(options) : null;
-      },
-    },
-  ],
+  imports: [MetricsModule],
+  providers: [EurekaRegistrationProvider],
 })
 export class EurekaClientModule {}
