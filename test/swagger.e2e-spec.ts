@@ -64,6 +64,21 @@ describe.each([
     if (!swagger.enabled) return;
     const document = response.body as OpenAPIObject;
     expect(document.openapi).toMatch(/^3\./);
+    expect(document.components?.securitySchemes?.bearerAuth).toEqual({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+    });
+    expect(document.security).toBeUndefined();
+    expect(document.paths['/'].get?.security).toEqual([{ bearerAuth: [] }]);
+    for (const operation of [
+      document.paths['/sms'].post,
+      document.paths['/sms'].get,
+      document.paths['/sms/verify'].post,
+    ]) {
+      expect(operation).toBeDefined();
+      expect(operation?.security).toBeUndefined();
+    }
     for (const status of ['200', '400', '429', '502', '500']) {
       expect(document.paths['/sms'].post?.responses).toHaveProperty(status);
     }
@@ -105,7 +120,7 @@ describe.each([
       );
       for (const path of internal) {
         const operation = document.paths[path].get ?? document.paths[path].post;
-        expect(operation?.security).toContainEqual({ internalToken: [] });
+        expect(operation?.security).toEqual([{ internalToken: [] }]);
         expect(operation?.responses).toHaveProperty('403');
       }
     } else {

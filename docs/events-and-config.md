@@ -141,6 +141,9 @@ DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고
 
 서비스 식별자는 `notification` (`CONFIG_SERVICE_NAME`으로 변경 가능). 조회 경로: `GET {CONFIG_SERVER_URL}/configs/notification/{profile}`.
 config-server 값이 env 값보다 우선하고, config-server 호출이 실패하면 부팅을 실패시킨다.
+config-server가 인증을 켜면(Expo-Config-Server#54) `CONFIG_SERVER_PASSWORD`를 env로 준다. Basic 인증으로 보내며
+사용자 이름은 위 서비스 식별자다 (config-server는 자기 식별자의 설정만 내려주므로 `CONFIG_SERVICE_NAME`을 바꾸면
+그 식별자의 비밀번호가 필요하다). 비밀번호를 `CONFIG_SERVER_URL`에 넣지 않는다. 비어 있으면 헤더 없이 호출한다.
 
 ```yaml
 port: 3000
