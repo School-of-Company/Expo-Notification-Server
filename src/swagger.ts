@@ -10,7 +10,11 @@ export function setupSwagger(app: INestApplication): void {
   const builder = new DocumentBuilder()
     .setTitle('박람회 알림 API')
     .setDescription('문자 인증 API입니다. 예시는 모두 합성 데이터입니다.')
-    .setVersion('1.0');
+    .setVersion('1.0')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'bearerAuth',
+    );
   if (includeInternal) {
     builder.addApiKey(
       {
