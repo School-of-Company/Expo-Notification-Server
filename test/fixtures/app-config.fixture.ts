@@ -3,6 +3,7 @@ import { AppConfig } from '../../src/config/app-config';
 export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 3000,
+    metrics: { enabled: false, port: 0, host: '127.0.0.1' },
     swagger: { enabled: false, includeInternal: false },
     kafka: {
       brokers: ['localhost:9092'],
