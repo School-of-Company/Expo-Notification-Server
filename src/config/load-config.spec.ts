@@ -110,7 +110,7 @@ describe('loadConfig', () => {
 
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://config:3000/configs/notification/dev',
-      { signal: expect.any(AbortSignal) as AbortSignal },
+      { signal: expect.any(AbortSignal) as AbortSignal, headers: {} },
     );
     expect(config.port).toBe(4000);
     expect(config.sms.apiKey).toBe('vault-key');
@@ -134,7 +134,47 @@ describe('loadConfig', () => {
 
     expect(fetchImpl).toHaveBeenCalledWith('http://config/configs/sms/local', {
       signal: expect.any(AbortSignal) as AbortSignal,
+      headers: {},
     });
+  });
+
+  it('CONFIG_SERVER_PASSWORD가 있으면 서비스 식별자로 Basic 인증 헤더를 보낸다', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({}));
+
+    await loadConfig(
+      {
+        ...baseEnv,
+        CONFIG_SERVER_URL: 'http://config',
+        CONFIG_SERVER_PASSWORD: 'pw:1',
+      },
+      fetchImpl,
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://config/configs/notification/local',
+      {
+        signal: expect.any(AbortSignal) as AbortSignal,
+        headers: {
+          Authorization: `Basic ${Buffer.from('notification:pw:1').toString('base64')}`,
+        },
+      },
+    );
+  });
+
+  it('config 서버가 401을 주면 비밀번호를 노출하지 않고 부팅을 실패시킨다', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({}, 401));
+    const loading = loadConfig(
+      {
+        ...baseEnv,
+        CONFIG_SERVER_URL: 'http://config',
+        CONFIG_SERVER_PASSWORD: 'secret-pw',
+      },
+      fetchImpl,
+    );
+
+    await expect(loading).rejects.toThrow(
+      /^config server responded 401 \(notification\/local\)$/,
+    );
   });
 
   it('config 서버가 4xx/5xx를 주면 부팅을 실패시킨다', async () => {

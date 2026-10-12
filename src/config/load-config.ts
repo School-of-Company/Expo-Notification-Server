@@ -4,7 +4,7 @@ import { AppConfig, appConfigSchema } from './app-config';
 type Env = Record<string, string | undefined>;
 type FetchLike = (
   url: string,
-  init?: { signal?: AbortSignal },
+  init?: { signal?: AbortSignal; headers?: Record<string, string> },
 ) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>;
 
 const DEFAULT_SERVICE_NAME = 'notification';
@@ -119,6 +119,19 @@ function configFromEnv(env: Env): Record<string, unknown> {
   };
 }
 
+// config-server Basic 인증(Expo-Config-Server#54). 사용자 이름은 조회하는 서비스 식별자다.
+// 비밀번호가 없으면 헤더 없이 호출해 인증을 켜기 전의 config-server 와도 동작한다.
+function basicAuthHeader(
+  service: string,
+  password: string | undefined,
+): Record<string, string> {
+  if (!password) {
+    return {};
+  }
+  const credentials = Buffer.from(`${service}:${password}`).toString('base64');
+  return { Authorization: `Basic ${credentials}` };
+}
+
 async function fetchRemoteConfig(
   env: Env,
   fetchImpl: FetchLike,
@@ -133,7 +146,10 @@ async function fetchRemoteConfig(
 
   let response: Awaited<ReturnType<FetchLike>>;
   try {
-    response = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
+    response = await fetchImpl(url, {
+      signal: AbortSignal.timeout(10_000),
+      headers: basicAuthHeader(service, env.CONFIG_SERVER_PASSWORD),
+    });
   } catch {
     throw new Error(`config server unreachable (${service}/${profile})`);
   }
