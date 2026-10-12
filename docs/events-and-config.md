@@ -203,3 +203,5 @@ Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행
 [Notification #10 계약](notification-10-admin-group-messaging.md)에 기록한다. 기능은
 `adminGroupMessaging.enabled`가 true이고 32자 이상의 `internalToken`이 설정된 환경에서만 발송한다.
 Kakao 설정이 없으면 SMS만 사용할 수 있으며 Kakao의 SMS 자동 대체는 꺼져 있다.
+행사별 문자 처리이력의 기간·유형·커서 페이지, 기존 `retentionSeconds` 사용과 Application 권한 접합은
+[Notification #42 계약](notification-42-admin-message-history.md)에 기록한다. 추가 env/config는 없다.

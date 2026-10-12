@@ -34,6 +34,10 @@ participant별 target과 렌더링 문구를 유지하며 같은 번호라는 �
 - `GET /jobs/{jobId}?requesterUserId=&expoId=` (200): 진행 수와 target별 실패 사유를 반환한다.
 - `POST /jobs/{jobId}/retries` (202): fresh fingerprint 확인 후 `FAILED` target만 `PENDING`으로 바꾼다.
   같은 idempotencyKey의 상태 변경은 Redis에서 한 번만 적용한다.
+- `GET /expos/{expoId}/history` (200): 행사별 요청/발송/실패/재시도 스냅샷을 기간·유형 필터와
+  최신순 커서 페이지로 반환한다. 기존 내부 토큰 대리조회 구조를 사용하며 새 이력 경로의 인증 실패는
+  401이다. Application 매 페이지 현재 JWT/행사 권한 검증과 후속 공개 API 접합 요구는
+  [#42 이력 계약](notification-42-admin-message-history.md)을 따른다.
 
 미리보기 target은 최대 5,000건이다. 발송 가능한 target에는 `targetId`, `applicationId`, optional
 `participantId`, `programType`, `recipientPhone`, `content`가 필요하다. Kakao만 optional

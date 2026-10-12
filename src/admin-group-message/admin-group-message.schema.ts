@@ -138,6 +138,7 @@ export const groupMessageJobSchema = z.object({
   previewId: z.uuid(),
   requesterUserId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   expoId: z.uuid(),
+  applicationCount: z.number().int().positive().optional(),
   targetFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   channel: z.enum(['SMS', 'KAKAO']),
   templateId: id.optional(),
@@ -155,6 +156,26 @@ export const groupMessageJobSchema = z.object({
   targets: z.array(targetRecordSchema).min(1).max(5000),
 });
 export type GroupMessageJob = z.infer<typeof groupMessageJobSchema>;
+
+export function parseGroupMessagePreviewRecord(
+  raw: string,
+): GroupMessagePreviewRecord {
+  try {
+    const body: unknown = JSON.parse(raw);
+    return groupMessagePreviewRecordSchema.parse(body);
+  } catch {
+    throw new GroupMessageRetryError();
+  }
+}
+
+export function parseGroupMessageJob(raw: string): GroupMessageJob {
+  try {
+    const body: unknown = JSON.parse(raw);
+    return groupMessageJobSchema.parse(body);
+  } catch {
+    throw new GroupMessageRetryError();
+  }
+}
 
 export class GroupMessageRetryError extends Error {
   constructor() {
