@@ -101,6 +101,7 @@ describe.each([
       swagger.includeInternal
         ? [
             '/internal/admin-group-messages/config',
+            '/internal/admin-group-messages/expos/{expoId}/history',
             '/internal/admin-group-messages/jobs/{jobId}',
             '/internal/admin-group-messages/jobs/{jobId}/retries',
             '/internal/admin-group-messages/previews',
@@ -121,8 +122,19 @@ describe.each([
       for (const path of internal) {
         const operation = document.paths[path].get ?? document.paths[path].post;
         expect(operation?.security).toEqual([{ internalToken: [] }]);
-        expect(operation?.responses).toHaveProperty('403');
+        expect(operation?.responses).toHaveProperty(
+          path.endsWith('/history') ? '401' : '403',
+        );
       }
+      const history =
+        document.paths['/internal/admin-group-messages/expos/{expoId}/history']
+          .get;
+      expect(history?.responses).toHaveProperty('400');
+      expect(history?.responses).toHaveProperty('503');
+      expect(JSON.stringify(history?.responses['200'])).toContain(
+        'applicationCount',
+      );
+      expect(JSON.stringify(history?.responses['200'])).toContain('delivered');
     } else {
       expect(
         document.components?.securitySchemes?.internalToken,

@@ -103,11 +103,15 @@ export class AdminGroupMessageService {
     this.assertJobBinding(job, authorization);
     if (job.targetFingerprint !== authorization.targetFingerprint)
       throw new ConflictException('target fingerprint changed');
+    if (!job.targets.some((target) => target.status === 'FAILED'))
+      return this.jobResponse(job);
     const token = await this.store.claim(jobId);
     if (!token) return this.jobResponse(job);
     try {
       const current = await this.store.getJob(jobId);
       if (!current) throw new NotFoundException();
+      if (!current.targets.some((target) => target.status === 'FAILED'))
+        return this.jobResponse(current);
       const updated: GroupMessageJob = {
         ...current,
         authorizedUntil: this.authorizedUntil(),

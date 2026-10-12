@@ -69,7 +69,11 @@ export class GroupMessageRuntime {
   readonly sender = new FakeGroupMessageSender();
   app?: INestApplication<Server>;
 
-  constructor(infra: Pick<LocalInfra, 'redisPort'>) {
+  constructor(
+    infra: Pick<LocalInfra, 'redisPort'>,
+    private readonly retentionSeconds = 2592000,
+    private readonly enabled = true,
+  ) {
     this.redis = new Redis({
       host: '127.0.0.1',
       port: infra.redisPort,
@@ -83,11 +87,11 @@ export class GroupMessageRuntime {
     const base = createAppConfig();
     const config = createAppConfig({
       adminGroupMessaging: {
-        enabled: true,
+        enabled: this.enabled,
         internalToken: 'g'.repeat(32),
         previewTtlSeconds: 1800,
         authorizationTtlSeconds: 300,
-        retentionSeconds: 2592000,
+        retentionSeconds: this.retentionSeconds,
       },
       sms: { ...base.sms },
     });
