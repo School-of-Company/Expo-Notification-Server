@@ -161,6 +161,45 @@ describe('loadConfig', () => {
     );
   });
 
+  it('CONFIG_SERVICE_NAME을 바꾸면 그 식별자를 Basic 인증 사용자 이름으로 쓴다', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({}));
+
+    await loadConfig(
+      {
+        ...baseEnv,
+        CONFIG_SERVER_URL: 'http://config',
+        CONFIG_SERVICE_NAME: 'sms',
+        CONFIG_SERVER_PASSWORD: 'pw',
+      },
+      fetchImpl,
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith('http://config/configs/sms/local', {
+      signal: expect.any(AbortSignal) as AbortSignal,
+      headers: {
+        Authorization: `Basic ${Buffer.from('sms:pw').toString('base64')}`,
+      },
+    });
+  });
+
+  it('CONFIG_SERVER_PASSWORD가 빈 문자열이면 인증 헤더를 보내지 않는다', async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({}));
+
+    await loadConfig(
+      {
+        ...baseEnv,
+        CONFIG_SERVER_URL: 'http://config',
+        CONFIG_SERVER_PASSWORD: '',
+      },
+      fetchImpl,
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://config/configs/notification/local',
+      { signal: expect.any(AbortSignal) as AbortSignal, headers: {} },
+    );
+  });
+
   it('config 서버가 401을 주면 비밀번호를 노출하지 않고 부팅을 실패시킨다', async () => {
     const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({}, 401));
     const loading = loadConfig(
