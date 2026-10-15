@@ -23,12 +23,14 @@ describe('SmsAuthService', () => {
 
   beforeEach(() => {
     store = {
-      increaseSendCount: jest.fn().mockResolvedValue(1),
+      increaseSendCount: jest
+        .fn()
+        .mockResolvedValue({ count: 1, window: 'w1' }),
       increaseGlobalSendCount: jest.fn().mockResolvedValue(1),
-      saveCode: jest.fn(),
+      saveCode: jest.fn().mockResolvedValue(true),
       find: jest.fn(),
       increaseVerifyAttemptCount: jest.fn().mockResolvedValue(1),
-      markVerified: jest.fn(),
+      markVerified: jest.fn().mockResolvedValue(true),
     };
     sender = { send: jest.fn().mockResolvedValue({ total: 1, failedTo: [] }) };
     service = new SmsAuthService(
@@ -42,7 +44,12 @@ describe('SmsAuthService', () => {
     it('4자리 숫자 코드를 저장하고 같은 코드를 일반 참가자 발신번호로 발송한다', async () => {
       await service.sendCode('01012345678');
 
-      const [, savedCode] = store.saveCode.mock.calls[0] as [string, string];
+      const [, window, savedCode] = store.saveCode.mock.calls[0] as [
+        string,
+        string,
+        string,
+      ];
+      expect(window).toBe('w1');
       expect(savedCode).toMatch(/^\d{4}$/);
       expect(sender.send).toHaveBeenCalledWith([
         {
@@ -55,9 +62,10 @@ describe('SmsAuthService', () => {
     });
 
     it('요청 횟수 상한을 넘으면 429이고 발송하지 않는다', async () => {
-      store.increaseSendCount.mockResolvedValue(
-        config.sms.authMaxSendCount + 1,
-      );
+      store.increaseSendCount.mockResolvedValue({
+        count: config.sms.authMaxSendCount + 1,
+        window: 'w1',
+      });
 
       await expect(service.sendCode('01012345678')).rejects.toMatchObject({
         status: 429,
@@ -79,9 +87,10 @@ describe('SmsAuthService', () => {
     });
 
     it('번호별 상한에 걸린 요청은 전체 카운터를 올리지 않는다', async () => {
-      store.increaseSendCount.mockResolvedValue(
-        config.sms.authMaxSendCount + 1,
-      );
+      store.increaseSendCount.mockResolvedValue({
+        count: config.sms.authMaxSendCount + 1,
+        window: 'w1',
+      });
 
       await expect(service.sendCode('01012345678')).rejects.toMatchObject({
         status: 429,
@@ -98,9 +107,21 @@ describe('SmsAuthService', () => {
     });
 
     it('상한과 같은 횟수까지는 허용한다', async () => {
-      store.increaseSendCount.mockResolvedValue(config.sms.authMaxSendCount);
+      store.increaseSendCount.mockResolvedValue({
+        count: config.sms.authMaxSendCount,
+        window: 'w1',
+      });
 
       await expect(service.sendCode('01012345678')).resolves.toBeUndefined();
+    });
+
+    it('카운트 후 저장 전에 창이 만료되면 409이고 발송하지 않는다', async () => {
+      store.saveCode.mockResolvedValue(false);
+
+      await expect(service.sendCode('01012345678')).rejects.toMatchObject({
+        status: 409,
+      });
+      expect(sender.send).not.toHaveBeenCalled();
     });
 
     it('문자 발송이 실패하면 502를 던진다', async () => {
@@ -116,14 +137,14 @@ describe('SmsAuthService', () => {
   });
 
   describe('verifyCode', () => {
-    const state = { code: '0123', verified: false };
+    const state = { code: '0123', verified: false, window: 'w1' };
 
     it('코드가 맞으면 인증 완료로 표시한다', async () => {
       store.find.mockResolvedValue(state);
 
       await service.verifyCode('01012345678', '0123');
 
-      expect(store.markVerified).toHaveBeenCalledWith('01012345678');
+      expect(store.markVerified).toHaveBeenCalledWith('01012345678', 'w1');
     });
 
     it('앞자리 0이 있는 코드를 숫자로 환산해 비교하지 않는다', async () => {
@@ -143,6 +164,25 @@ describe('SmsAuthService', () => {
       expect(store.increaseVerifyAttemptCount).not.toHaveBeenCalled();
     });
 
+    it('조회 후 창이 만료되면 404이고 비교·인증하지 않는다', async () => {
+      store.find.mockResolvedValue(state);
+      store.increaseVerifyAttemptCount.mockResolvedValue(null);
+
+      await expect(
+        service.verifyCode('01012345678', '0123'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(store.markVerified).not.toHaveBeenCalled();
+    });
+
+    it('인증 표시 직전에 창이 만료되면 404이다', async () => {
+      store.find.mockResolvedValue(state);
+      store.markVerified.mockResolvedValue(false);
+
+      await expect(
+        service.verifyCode('01012345678', '0123'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
     it('코드가 틀리면 400이다', async () => {
       store.find.mockResolvedValue(state);
 
@@ -159,6 +199,7 @@ describe('SmsAuthService', () => {
 
       expect(store.increaseVerifyAttemptCount).toHaveBeenCalledWith(
         '01012345678',
+        'w1',
       );
     });
 
