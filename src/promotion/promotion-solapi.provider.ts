@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { createHmac, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { solapiRequest } from '../sms/solapi-request';
 import type { AppConfig } from '../config/app-config';
 import type { OutgoingSms } from '../sms/sms-sender.provider';
 import type { PromotionRecord } from './promotion.schema';
@@ -57,22 +57,8 @@ export type PromotionDelivery = {
 export class PromotionSolapiProvider {
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
-  private async request(path: string, body?: unknown): Promise<Response> {
-    const date = new Date().toISOString();
-    const salt = randomBytes(16).toString('hex');
-    const signature = createHmac('sha256', this.config.sms.apiSecret)
-      .update(date + salt)
-      .digest('hex');
-    // SDK 6.0.1 retries transport errors/503 internally. A send must have exactly one HTTP attempt.
-    return fetch(`https://api.solapi.com${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `HMAC-SHA256 apiKey=${this.config.sms.apiKey}, date=${date}, salt=${salt}, signature=${signature}`,
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(10000),
-    });
+  private request(path: string, body?: unknown): Promise<Response> {
+    return solapiRequest(this.config, path, body);
   }
 
   async send(

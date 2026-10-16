@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { createHmac, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { solapiRequest } from '../sms/solapi-request';
 import type { AppConfig } from '../config/app-config';
 import type { GroupMessageJob } from './admin-group-message.schema';
 import {
@@ -59,20 +59,7 @@ export class GroupMessageSolapiProvider implements GroupMessageSender {
   constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   private request(path: string, body?: unknown): Promise<Response> {
-    const date = new Date().toISOString();
-    const salt = randomBytes(16).toString('hex');
-    const signature = createHmac('sha256', this.config.sms.apiSecret)
-      .update(date + salt)
-      .digest('hex');
-    return fetch(`https://api.solapi.com${path}`, {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `HMAC-SHA256 apiKey=${this.config.sms.apiKey}, date=${date}, salt=${salt}, signature=${signature}`,
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(10_000),
-    });
+    return solapiRequest(this.config, path, body);
   }
 
   async send(
