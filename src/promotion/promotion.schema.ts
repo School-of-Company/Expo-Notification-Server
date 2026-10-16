@@ -1,12 +1,13 @@
 import { z } from 'zod';
 
 const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const label = z
-  .string()
-  .trim()
-  .min(1)
-  .max(100)
-  .regex(/^[^\p{C}\p{Zl}\p{Zp}]+$/u);
+const label = (max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .regex(/^[^\p{C}\p{Zl}\p{Zp}]+$/u);
 
 export const promotionEventSchema = z.object({
   version: z.literal(1),
@@ -38,11 +39,11 @@ export const promotionCheckSchema = z.discriminatedUnion('eligible', [
         .string()
         .regex(/^0\d{8,10}$/)
         .nullable(),
-      participantName: label,
-      programName: label,
+      participantName: label(100),
+      programName: label(100),
       startedAt: z.iso.datetime({ offset: true }),
       endedAt: z.iso.datetime({ offset: true }),
-      location: label.nullable(),
+      location: label(255).nullable(),
       applicationLookupUrl: z
         .url()
         .max(500)

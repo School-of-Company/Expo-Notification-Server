@@ -93,6 +93,32 @@ describe('promotion HTTP/Kafka/Redis contracts with synthetic SMS', () => {
     );
   });
 
+  it('accepts a 255-code-point supplementary-plane location from promotion check and rejects 256', async () => {
+    runtime.http.checkResponse = (event) => ({
+      ...eligible(event),
+      location: '😀'.repeat(255),
+    });
+    await runtime.start();
+    const accepted = promoted();
+    await runtime.publish(accepted);
+    await runtime.committed(1);
+    expect(runtime.http.sms).toHaveLength(1);
+    expect(runtime.http.sms[0]?.text).toContain(`장소: ${'😀'.repeat(255)}`);
+
+    runtime.http.checkResponse = (event) => ({
+      ...eligible(event),
+      location: '😀'.repeat(256),
+    });
+    const rejected = promoted();
+    await runtime.publish(rejected);
+    await runtime.committed(2);
+    expect(runtime.http.sms).toHaveLength(1);
+    expect(await runtime.store.get(rejected.eventId)).toMatchObject({
+      status: 'PENDING',
+      reason: 'LOOKUP_UNAVAILABLE',
+    });
+  });
+
   it('stores missing representative phone for operations and does not automatically retry', async () => {
     runtime.http.checkResponse = (event) => {
       const check = eligible(event);

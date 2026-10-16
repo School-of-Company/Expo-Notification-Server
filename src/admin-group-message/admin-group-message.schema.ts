@@ -9,7 +9,7 @@ export const templateVariablesSchema = z
     name: z.string().max(100).optional(),
     programName: z.string().max(200).optional(),
     sessionName: z.string().max(200).optional(),
-    location: z.string().max(200).optional(),
+    location: z.string().max(255).optional(),
   })
   .strict();
 
