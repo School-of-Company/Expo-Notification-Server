@@ -1,5 +1,9 @@
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
-import { EventInProgressError } from './sms-errors';
+import {
+  EventInProgressError,
+  SmsDeliveryRejectedError,
+  SmsDeliveryUnknownError,
+} from './sms-errors';
 import { SmsEventGuard } from './sms-event.guard';
 
 describe('SmsEventGuard', () => {
@@ -9,6 +13,8 @@ describe('SmsEventGuard', () => {
     release: jest.Mock;
     increaseFailureCount: jest.Mock;
     clearFailureCount: jest.Mock;
+    markSending: jest.Mock;
+    markUnknown: jest.Mock;
   };
   let guard: SmsEventGuard;
 
@@ -19,6 +25,8 @@ describe('SmsEventGuard', () => {
       release: jest.fn().mockResolvedValue(undefined),
       increaseFailureCount: jest.fn().mockResolvedValue(2),
       clearFailureCount: jest.fn(),
+      markSending: jest.fn().mockResolvedValue(undefined),
+      markUnknown: jest.fn().mockResolvedValue(undefined),
     };
     guard = new SmsEventGuard(dedupe as unknown as SmsEventDedupeStore);
   });
@@ -112,6 +120,56 @@ describe('SmsEventGuard', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('결과 불명으로 남은 이벤트는 작업 없이 SmsDeliveryUnknownError를 던진다', async () => {
+    dedupe.claim.mockResolvedValue('unknown');
+    const work = jest.fn();
+
+    await expect(guard.once('e1', work)).rejects.toBeInstanceOf(
+      SmsDeliveryUnknownError,
+    );
+    expect(work).not.toHaveBeenCalled();
+    expect(dedupe.release).not.toHaveBeenCalled();
+  });
+
+  it('공급자 호출 시작 뒤의 실패는 선점을 풀지 않고 UNKNOWN으로 남긴다', async () => {
+    const error = await guard
+      .once('e1', async (beginSend) => {
+        await beginSend();
+        throw new Error('socket hang up');
+      })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(SmsDeliveryUnknownError);
+    expect((error as Error).message).not.toContain('socket');
+    expect(dedupe.markSending).toHaveBeenCalledWith('e1');
+    expect(dedupe.markUnknown).toHaveBeenCalledWith('e1');
+    expect(dedupe.release).not.toHaveBeenCalled();
+    expect(dedupe.complete).not.toHaveBeenCalled();
+  });
+
+  it('UNKNOWN 표시가 실패해도 선점을 풀지 않는다 (SENDING이 재발송을 막는다)', async () => {
+    dedupe.markUnknown.mockRejectedValue(new Error('redis down'));
+
+    await expect(
+      guard.once('e1', async (beginSend) => {
+        await beginSend();
+        throw new SmsDeliveryUnknownError('timeout');
+      }),
+    ).rejects.toBeInstanceOf(SmsDeliveryUnknownError);
+    expect(dedupe.release).not.toHaveBeenCalled();
+  });
+
+  it('공급자 호출 뒤라도 명시적 거부면 선점을 풀어 제한 재시도한다', async () => {
+    await expect(
+      guard.once('e1', async (beginSend) => {
+        await beginSend();
+        throw new SmsDeliveryRejectedError('rejected');
+      }),
+    ).rejects.toBeInstanceOf(SmsDeliveryRejectedError);
+    expect(dedupe.release).toHaveBeenCalledWith('e1');
+    expect(dedupe.markUnknown).not.toHaveBeenCalled();
   });
 
   it('recordFailure는 실패 횟수를, clearFailures는 카운터 삭제를 위임한다', async () => {

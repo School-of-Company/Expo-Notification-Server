@@ -207,4 +207,32 @@ describe('SmsEventDedupeStore', () => {
 
     expect(redis.del).toHaveBeenCalledWith('sms:event:e1');
   });
+
+  it('SENDING/UNKNOWN은 완료 마커와 같은 7일 동안 남겨 선점 만료·재시작 뒤에도 재발송을 막는다', async () => {
+    await store.markSending('e1');
+    await store.markUnknown('e1');
+
+    expect(redis.set).toHaveBeenNthCalledWith(
+      1,
+      'sms:event:e1',
+      'sending',
+      'EX',
+      604800,
+    );
+    expect(redis.set).toHaveBeenNthCalledWith(
+      2,
+      'sms:event:e1',
+      'unknown',
+      'EX',
+      604800,
+    );
+  });
+
+  it('SENDING/UNKNOWN이 남은 이벤트의 선점은 unknown이다 (처리 중 대기와 구분)', async () => {
+    redis.set.mockResolvedValue(null);
+    redis.get.mockResolvedValueOnce('sending').mockResolvedValueOnce('unknown');
+
+    await expect(store.claim('e1')).resolves.toBe('unknown');
+    await expect(store.claim('e1')).resolves.toBe('unknown');
+  });
 });

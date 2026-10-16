@@ -8,13 +8,14 @@ import { ZodType } from 'zod';
 import { parseKafkaJson } from '../common/kafka-json';
 import { AppConfig } from '../config/app-config';
 import { SmsEventGuard } from './sms-event.guard';
-import { countsTowardDeadLetter } from './sms-errors';
+import { countsTowardDeadLetter, SmsDeliveryUnknownError } from './sms-errors';
 
 /**
  * 문자 발송 이벤트 consumer 공통부.
  * - 형식이 틀린 메시지는 로그만 남기고 건너뛴다 (던지면 Kafka가 무한 재전달한다).
  * - 처리 실패는 던져서 재전달시키되, `sms.eventMaxAttempts`번 실패하면 원본을 DLQ로 옮기고 넘어간다.
  *   (발행 실패·처리 중 대기는 횟수에 세지 않는다 — sms-errors.ts)
+ * - 접수 결과 불명은 재전달하지 않는다: 원본을 `x-sms-delivery: UNKNOWN` 헤더로 DLQ에 보관하고 다음 이벤트로 넘어간다.
  */
 export abstract class SmsKafkaConsumer<T extends { eventId: string }>
   implements OnApplicationBootstrap, OnModuleDestroy
@@ -70,6 +71,13 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
     try {
       await this.handle(event);
     } catch (error) {
+      if (error instanceof SmsDeliveryUnknownError) {
+        await this.moveToDeadLetter(message, { 'x-sms-delivery': 'UNKNOWN' });
+        this.logger.error(
+          `접수 결과 불명 이벤트를 DLQ에 보관(자동 재발송 안 함): topic=${this.topic}, eventId=${event.eventId}`,
+        );
+        return;
+      }
       if (!countsTowardDeadLetter(error)) {
         throw error;
       }
@@ -77,16 +85,7 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
       if (attempts < this.config.sms.eventMaxAttempts) {
         throw error;
       }
-      await this.producer.send({
-        topic: this.config.kafka.topics.smsDeadLetter,
-        messages: [
-          {
-            key: message.key,
-            value: message.value,
-            headers: { 'x-source-topic': this.topic },
-          },
-        ],
-      });
+      await this.moveToDeadLetter(message);
       await this.guard
         .clearFailures(event.eventId)
         .catch((cleanupError: unknown) => {
@@ -102,5 +101,21 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
         error instanceof Error ? error.message : undefined,
       );
     }
+  }
+
+  private async moveToDeadLetter(
+    message: KafkaMessage,
+    headers: Record<string, string> = {},
+  ): Promise<void> {
+    await this.producer.send({
+      topic: this.config.kafka.topics.smsDeadLetter,
+      messages: [
+        {
+          key: message.key,
+          value: message.value,
+          headers: { 'x-source-topic': this.topic, ...headers },
+        },
+      ],
+    });
   }
 }
