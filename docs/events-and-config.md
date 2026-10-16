@@ -131,9 +131,11 @@ DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| `POST` | `/sms` | `{ phoneNumber }` — 4자리 인증번호 발송. 번호별 상한 초과 또는 **전체 시간당 상한(`authMaxSendCountPerHour`, 기본 300) 초과 시 429**, 게이트웨이 실패 시 502 |
+| `POST` | `/sms` | `{ phoneNumber }` — 4자리 인증번호 발송. 번호별 상한 초과 또는 **전체 시간당 상한(`authMaxSendCountPerHour`, 기본 300) 초과 시 429**, 처리 중 인증 창이 만료되면 409(문자 미발송, 다시 요청), 게이트웨이 실패 시 502 |
 | `POST` | `/sms/verify` | `{ phoneNumber, code }` — 인증번호 검증 (없으면 404, 불일치 400, 시도 상한 초과 429 — 맞고 틀리고와 무관하게 시도마다 횟수가 오른다) |
 | `GET` | `/sms?phoneNumber=&code=` | deprecated. 위와 동일하지만 코드가 URL/접근 로그에 남는다 |
+
+> 인증 창(`sms:auth:{phoneNumber}` hash): 첫 발송이 Lua로 TTL(`authCodeTtlSeconds`)과 창 토큰을 함께 심고, 창 안의 재발송은 TTL을 늘리지 않으며 검증 시도 횟수도 유지한다. 코드 저장·시도 횟수·인증 표시는 Lua로 같은 창 토큰일 때만 반영하므로, 처리 중 창이 만료되면 TTL 없는 키를 되살리거나 그 사이 열린 새 창을 덮어쓰지 않는다. 발송은 이때 새 창을 열지 않고 409로 실패하고(번호별 상한 우회 방지, 전체 시간당 카운터는 이미 소모), 검증은 404로 본다. 창 토큰이 없는 이전 버전 키는 인증에 쓰지 않고 다음 발송 때 새 창으로 바꾼다.
 
 > Gateway: `/sms`가 `publicPaths`에 없으면 가입 전 인증번호 발송이 JWT에 막힌다. Eureka 서비스 이름은 `expo-notification-server`이므로 Gateway 라우팅(`/sms: expo-sms-server`)도 이 이름으로 바꿔야 한다. Gateway 전역 rate limit(IP당 100/분)은 문자 비용 방어로는 느슨해서 알림 서버에 전체 시간당 상한을 따로 두었다.
 

@@ -38,6 +38,10 @@ export class SmsController {
     status: 429,
     description: '번호별 또는 시간당 발송 횟수 초과',
   })
+  @ApiResponse({
+    status: 409,
+    description: '처리 중 인증 요청 창이 만료됨 (문자 미발송, 다시 요청)',
+  })
   @ApiResponse({ status: 502, description: '인증번호 발송 실패' })
   @HttpCode(200)
   @UsePipes(new ZodValidationPipe(sendCodeSchema))
