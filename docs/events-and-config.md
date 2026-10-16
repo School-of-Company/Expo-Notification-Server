@@ -66,7 +66,12 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 | `DRAW_RESULT` | `phoneNumber`, `drawNumber` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정) |
 | `CUSTOM` | `phoneNumbers[1..1000]`, `senderType`, `text` | 본문을 호출 측이 만든 일반/대량 문자 (연수 일정 안내 포함) |
 
-완료 시점부터 7일 동안 `done-v2` 마커가 남아 있으면 같은 `eventId`의 문자 재발송을 억제한다. TTL 만료나 Redis 유실, 문자 성공 뒤 완료 기록 실패에서는 중복 발송이 가능하므로 정확히 한 번 발송을 보장하지 않는다. 발송이 전부 실패하면 consumer가 던져 Kafka가 재전달하고, 일부 수신자만 실패하면 재전달하지 않는다(성공한 수신자 중복 발송 방지).
+완료 시점부터 7일 동안 `done-v2` 마커가 남아 있으면 같은 `eventId`의 문자 재발송을 억제한다. 발송 결과는 세 가지로 나눈다(아래 **접수 결과 불명(UNKNOWN)** 참고).
+- 명시적 거부(공급자가 한 건도 접수하지 않음): consumer가 던져 Kafka가 재전달하고, `sms.eventMaxAttempts`번 실패하면 DLQ로 옮긴다.
+- 일부 수신자만 실패: 재전달하지 않는다(접수된 수신자 중복 발송 방지). 마스킹된 번호로 경고 로그만 남긴다.
+- 접수 결과 불명(timeout·연결 끊김 등): 자동 재발송하지 않는다.
+
+7일 TTL 만료나 Redis 데이터 유실 뒤의 replay는 여전히 중복 가능성이 있어 정확히 한 번 발송을 보장하지 않는다.
 
 #### 연수 신청 CUSTOM 수신 번호 (Notification #11)
 
@@ -115,7 +120,32 @@ Redis 키, processing/done 상태 및 TTL 인자는 기존 `sms-stores.spec.ts`�
 DLQ로 옮길 때 이벤트별 실패 카운터를 지워서, 재처리한 메시지가 첫 실패에 곧바로 다시 DLQ로 가지 않는다. 연수 CUSTOM은 2026-10-12 Expo 담당자 합의에 따라 원인 해결 후 최초 Notification 처리 시도부터 7일 미만에 원본 `eventId`와 JSON을 유지하여 원 토픽으로 수동 재처리한다. 7일 이상 지났거나 최초 처리 시각을 확인할 수 없는 건은 담당자가 발송 이력과 중복 영향을 수동 판단한다. DLQ 보관 기간은 재처리 허용 기간이 아니다. DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다.
 DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고 원본 처리를 끝낸다. 정리 실패 시 잔존 카운터 때문에 수동 재처리가 조기에 다시 DLQ로 갈 수 있으므로 재처리 전에 해당 실패 카운터를 확인한다.
 
-한 가지 한계: 문자 발송 직후 Redis 장애로 완료 표시가 실패하면(100ms, 200ms 간격으로 총 3회 시도 후 로그만 남김), 선점이 만료(5분)된 뒤 재전달 때 문자가 한 번 더 나갈 수 있다. processing 이벤트는 그동안 건너뛰거나 DLQ로 보내지 않고 기다려 실제 처리 중 이벤트의 유실을 막는다.
+processing(선점 5분) 이벤트는 건너뛰거나 DLQ로 보내지 않고 기다려 실제 처리 중 이벤트의 유실을 막는다.
+
+#### 접수 결과 불명(UNKNOWN) — 일반·CUSTOM·QR 공통 (#46)
+
+공급자에 요청하기 직전에 `sms:event:{eventId}=sending`을 완료 마커와 같은 7일 TTL로 기록한다. 이후 결과는 다음처럼 처리한다.
+
+| 결과 | Redis 상태 | 처리 |
+|---|---|---|
+| 접수(전부 또는 일부) | `done-v2` | 완료. QR은 `qr-sms.sent` 발행 |
+| 명시적 거부: 4xx(408 제외), 전 건 `registeredFailed`, 연결 수립 실패(`ECONNREFUSED`·`ENOTFOUND`·`EAI_AGAIN`·`UND_ERR_CONNECT_TIMEOUT`) | 삭제(선점 해제) | 제한 재시도 → DLQ |
+| 결과 불명: 응답 timeout(15초), 연결 끊김, 408·5xx, 해석할 수 없는 응답, 호출 뒤 예외 | `unknown` | 자동 재발송 금지 |
+| 접수 뒤 완료 기록 3회 실패 / 호출 중 프로세스 종료 | `sending` 유지 | 재전달되면 결과 불명으로 처리 |
+
+- 결과 불명 이벤트는 원본 key/value를 `x-source-topic`과 `x-sms-delivery: UNKNOWN` 헤더로 DLQ에 보관한 뒤 오프셋을 넘겨 다음 이벤트를 처리한다. 실패 카운터에는 세지 않는다. 같은 `eventId`가 다시 오면(재전달, 재시작, replay) 문자를 보내지 않고 다시 DLQ에 보관한다. DLQ 발행이 실패하면 던져서 원본을 잃지 않는다. 재전달되더라도 Redis 상태 때문에 문자는 다시 나가지 않는다.
+- QR은 결과 불명이면 문자 발송을 확인할 수 없으므로 `qr-sms.sent`를 발행하지 않는다.
+- 이벤트 발송은 Solapi SDK를 거치지 않고 `send-many/detail`을 HTTP로 **한 번만** 호출한다. `solapi@6.0.1`의 기본 fetcher는 `aborted`·`refused`·`reset`·`econn` 네트워크 오류와 503을 내부에서 최대 3회 재시도하고 요청 timeout이 없다. 그래서 한 번의 `send()`가 같은 묶음을 여러 번 접수시킬 수 있다(승급·관리자 그룹 발송과 같은 이유). 메시지마다 `customFields.eventId`를 넣어 Solapi 콘솔에서 이벤트를 대조할 수 있게 했다. 인증번호(OTP) HTTP 발송은 이번 변경 범위가 아니어서 SDK 경로를 그대로 쓴다.
+- 새 설정 키는 없다. 이벤트 발송 timeout 15초는 코드 상수다. kafkajs는 메시지를 처리하는 동안 heartbeat를 보내지 않으므로 기본 session timeout(30초)보다 짧게 두었다. Solapi가 이보다 늦게 응답하면 결과 불명으로 처리된다. `allowDuplicates`는 SDK와 마찬가지로 보내지 않는다(서버 기본값). CUSTOM에 같은 번호가 중복되어 응답 건수가 요청 건수와 다르면 결과 불명으로 처리된다(재발송하지 않음).
+
+운영 복구(자동 복구 없음, 권한 있는 담당자만 수행):
+1. 로그 `문자 접수 결과 불명`과 DLQ의 `x-sms-delivery: UNKNOWN` 메시지에서 eventId를 확인한다. DLQ 원문에는 전화번호와 본문이 있으므로 로그·이슈·PR에 복사하지 않는다.
+2. Solapi 콘솔에서 `customFields.eventId`나 발송 시각으로 실제 접수·전달 여부를 확인한다. 리밸런스나 늦은 응답 때문에 실제로는 접수된 이벤트가 UNKNOWN DLQ에 들어갈 수 있다. 재발송하기 전에 이 단계를 반드시 거친다.
+3. 접수된 경우: `sms:event:{eventId}`를 `done-v2`(EX 604800)로 바꾼다. STANDARD QR이면 원본을 원 토픽으로 replay하여 문자 없이 `qr-sms.sent` 발행만 복구한다.
+4. 접수되지 않은 경우: `sms:event:{eventId}`를 삭제한 뒤 원본 `eventId`와 JSON을 그대로 원 토픽으로 replay한다. CUSTOM 일부만 접수된 경우 전체 replay는 접수된 수신자에게 중복 발송된다. 미접수 번호만 담은 새 `eventId` 이벤트를 따로 만들어야 한다.
+5. 상태 확인 없이 키를 삭제하거나 DLQ 전체를 일괄 replay하지 않는다. 일괄 replay는 `unknown`/`sending` 이벤트를 다시 DLQ로 보낼 뿐 발송하지 않으므로 안전하다. 반면 키를 지운 뒤 replay하면 다시 발송된다.
+
+배포 제약: 구버전 인스턴스는 `sending`/`unknown` 값을 처리 중으로 보고 재전달 대기를 반복한다(발송하지 않음). 혼합 버전 구간에서는 해당 파티션이 대기할 수 있으므로 같은 consumer group의 구버전을 모두 교체한다. 롤백할 때도 남아 있는 `sending`/`unknown` 키는 같은 이유로 해당 파티션을 막는다. 이 경우 위 복구 절차로 키를 먼저 정리한다. 발송 전 단계(이름 조회 등)는 선점 5분 안에 끝나야 한다. 이 시간을 넘기면 다른 인스턴스가 같은 이벤트를 선점할 수 있다(소유자 토큰은 두지 않았다).
 
 ### `expo.applicant-count.updated` — 박람회 등록 인원 변경
 
@@ -131,9 +161,11 @@ DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| `POST` | `/sms` | `{ phoneNumber }` — 4자리 인증번호 발송. 번호별 상한 초과 또는 **전체 시간당 상한(`authMaxSendCountPerHour`, 기본 300) 초과 시 429**, 게이트웨이 실패 시 502 |
+| `POST` | `/sms` | `{ phoneNumber }` — 4자리 인증번호 발송. 번호별 상한 초과 또는 **전체 시간당 상한(`authMaxSendCountPerHour`, 기본 300) 초과 시 429**, 처리 중 인증 창이 만료되면 409(문자 미발송, 다시 요청), 게이트웨이 실패 시 502 |
 | `POST` | `/sms/verify` | `{ phoneNumber, code }` — 인증번호 검증 (없으면 404, 불일치 400, 시도 상한 초과 429 — 맞고 틀리고와 무관하게 시도마다 횟수가 오른다) |
 | `GET` | `/sms?phoneNumber=&code=` | deprecated. 위와 동일하지만 코드가 URL/접근 로그에 남는다 |
+
+> 인증 창(`sms:auth:{phoneNumber}` hash): 첫 발송이 Lua로 TTL(`authCodeTtlSeconds`)과 창 토큰을 함께 심고, 창 안의 재발송은 TTL을 늘리지 않으며 검증 시도 횟수도 유지한다. 코드 저장·시도 횟수·인증 표시는 Lua로 같은 창 토큰일 때만 반영하므로, 처리 중 창이 만료되면 TTL 없는 키를 되살리거나 그 사이 열린 새 창을 덮어쓰지 않는다. 발송은 이때 새 창을 열지 않고 409로 실패하고(번호별 상한 우회 방지, 전체 시간당 카운터는 이미 소모), 검증은 404로 본다. 창 토큰이 없는 이전 버전 키는 인증에 쓰지 않고 다음 발송 때 새 창으로 바꾼다.
 
 > Gateway: `/sms`가 `publicPaths`에 없으면 가입 전 인증번호 발송이 JWT에 막힌다. Eureka 서비스 이름은 `expo-notification-server`이므로 Gateway 라우팅(`/sms: expo-sms-server`)도 이 이름으로 바꿔야 한다. Gateway 전역 rate limit(IP당 100/분)은 문자 비용 방어로는 느슨해서 알림 서버에 전체 시간당 상한을 따로 두었다.
 

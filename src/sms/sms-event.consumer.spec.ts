@@ -1,7 +1,11 @@
 import { EachMessageHandler } from 'kafkajs';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import { SmsEventConsumer } from './sms-event.consumer';
-import { EventInProgressError, SentEventPublishError } from './sms-errors';
+import {
+  EventInProgressError,
+  SentEventPublishError,
+  SmsDeliveryUnknownError,
+} from './sms-errors';
 import { SmsEventGuard } from './sms-event.guard';
 import { SmsEventService } from './sms-event.service';
 
@@ -190,6 +194,37 @@ describe('SmsEventConsumer', () => {
     await expect(eachMessage(toMessage(drawResult))).rejects.toThrow(
       'broker down',
     );
+  });
+
+  it('접수 결과 불명은 재전달하지 않고 원본을 UNKNOWN 헤더로 DLQ에 보관한 뒤 다음으로 넘어간다', async () => {
+    service.handle.mockRejectedValue(new SmsDeliveryUnknownError('unknown'));
+
+    await expect(eachMessage(toMessage(drawResult))).resolves.toBeUndefined();
+
+    expect(guard.recordFailure).not.toHaveBeenCalled();
+    expect(producer.send).toHaveBeenCalledWith({
+      topic: config.kafka.topics.smsDeadLetter,
+      messages: [
+        {
+          key: Buffer.from('k'),
+          value: Buffer.from(JSON.stringify(drawResult)),
+          headers: {
+            'x-source-topic': 'notification.sms.requested',
+            'x-sms-delivery': 'UNKNOWN',
+          },
+        },
+      ],
+    });
+  });
+
+  it('UNKNOWN 보관용 DLQ 발행이 실패하면 던져서 원본을 잃지 않는다 (재전달돼도 재발송은 guard가 막음)', async () => {
+    service.handle.mockRejectedValue(new SmsDeliveryUnknownError('unknown'));
+    producer.send.mockRejectedValue(new Error('broker down'));
+
+    await expect(eachMessage(toMessage(drawResult))).rejects.toThrow(
+      'broker down',
+    );
+    expect(guard.recordFailure).not.toHaveBeenCalled();
   });
 
   it('종료 시 consumer와 producer 연결을 끊는다', async () => {

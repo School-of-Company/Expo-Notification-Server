@@ -6,7 +6,12 @@ import { buildQrPageLinks } from './qr-page-links';
 import { ParticipantRegisteredEvent } from './participant-event.schema';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
-import { QrLinkError, SentEventPublishError } from './sms-errors';
+import {
+  QrLinkError,
+  SentEventPublishError,
+  SmsDeliveryRejectedError,
+  SmsDeliveryUnknownError,
+} from './sms-errors';
 import { SmsEventGuard } from './sms-event.guard';
 import { renderQrSms } from './sms-message.templates';
 import { SmsSenderProvider } from './sms-sender.provider';
@@ -36,7 +41,7 @@ export class QrSmsService {
       return;
     }
 
-    const result = await this.guard.once(event.eventId, async () => {
+    const result = await this.guard.once(event.eventId, async (beginSend) => {
       const links = buildQrPageLinks(template, event);
       const names = standard
         ? await this.names.findNames({
@@ -68,7 +73,8 @@ export class QrSmsService {
       if (Buffer.byteLength(text, 'utf8') > 2_000) {
         throw new QrLinkError('QR SMS exceeds single LMS byte limit');
       }
-      const { failedTo } = await this.sender.send([
+      await beginSend();
+      const receipt = await this.sender.deliver(event.eventId, [
         {
           to: event.phoneNumber,
           from: standard
@@ -77,8 +83,11 @@ export class QrSmsService {
           text,
         },
       ]);
-      if (failedTo.length > 0) {
-        throw new Error('qr sms delivery failed');
+      if (receipt.kind === 'rejected') {
+        throw new SmsDeliveryRejectedError(`qr sms rejected: ${receipt.code}`);
+      }
+      if (receipt.kind === 'unknown' || receipt.failedTo.length > 0) {
+        throw new SmsDeliveryUnknownError('qr sms acceptance unknown');
       }
     });
 

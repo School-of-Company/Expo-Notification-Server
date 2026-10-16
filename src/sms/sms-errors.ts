@@ -13,6 +13,15 @@ export class EventInProgressError extends RetryableWithoutDeadLetterError {}
 
 export class QrLinkError extends Error {}
 
+/** 공급자가 한 건도 접수하지 않았음이 확실한 실패. 선점을 풀고 제한 재시도한다. */
+export class SmsDeliveryRejectedError extends Error {}
+
+/**
+ * 공급자 접수 여부를 알 수 없다 (timeout·연결 끊김·성공 후 상태 기록 실패 등).
+ * 자동 재발송하지 않는다: consumer가 원본을 DLQ에 보관하고 다음 이벤트로 넘어간다.
+ */
+export class SmsDeliveryUnknownError extends Error {}
+
 export function countsTowardDeadLetter(error: unknown): boolean {
   return (
     (error as { countsTowardDeadLetter?: boolean } | null)

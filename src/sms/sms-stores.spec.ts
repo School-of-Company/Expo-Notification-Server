@@ -1,43 +1,53 @@
 import { Redis } from 'ioredis';
-import { SmsAuthStore } from './sms-auth.store';
+import { IN_WINDOW_LUA, OPEN_WINDOW_LUA, SmsAuthStore } from './sms-auth.store';
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
 
 describe('SmsAuthStore', () => {
   const exec = jest.fn();
   const chain: Record<string, jest.Mock> = {
-    hincrby: jest.fn().mockReturnThis(),
+    incr: jest.fn().mockReturnThis(),
     expire: jest.fn().mockReturnThis(),
     exec,
   };
   const redis = {
     multi: jest.fn(() => chain),
-    hincrby: jest.fn(),
-    hset: jest.fn(),
+    eval: jest.fn(),
     hgetall: jest.fn(),
   };
   const store = new SmsAuthStore(redis as unknown as Redis);
 
   beforeEach(() => {
     exec.mockReset();
-    redis.hincrby.mockReset();
-    redis.hset.mockReset();
+    redis.eval.mockReset();
     redis.hgetall.mockReset();
   });
 
-  it('발송 횟수 증가와 TTL 설정을 한 트랜잭션으로 보내고, TTL은 최초 1회만 건다 (NX)', async () => {
-    exec.mockResolvedValue([
-      [null, 2],
-      [null, 0],
-    ]);
+  // 창 만료·TTL 동작 자체는 test/integration/sms-auth-expiry.integration-spec.ts가 실제 Redis로 검증한다.
+  it('발송 횟수 증가와 창 열기를 한 스크립트로 보내고 횟수와 창 토큰을 돌려준다', async () => {
+    redis.eval.mockResolvedValue([2, 'w1']);
 
-    await expect(store.increaseSendCount('010', 180)).resolves.toBe(2);
-    expect(chain.hincrby).toHaveBeenCalledWith('sms:auth:010', 'sendCount', 1);
-    expect(chain.expire).toHaveBeenCalledWith('sms:auth:010', 180, 'NX');
+    await expect(store.increaseSendCount('010', 180)).resolves.toEqual({
+      count: 2,
+      window: 'w1',
+    });
+    expect(redis.eval).toHaveBeenCalledWith(
+      OPEN_WINDOW_LUA,
+      1,
+      'sms:auth:010',
+      180,
+      expect.any(String),
+    );
+  });
+
+  it('창 스크립트 결과 형태가 다르면 에러를 던진다', async () => {
+    redis.eval.mockResolvedValue(null);
+
+    await expect(store.increaseSendCount('010', 180)).rejects.toThrow(
+      'unexpected sms auth window result',
+    );
   });
 
   it('전체 발송 카운터는 시간 버킷 키를 INCR하고 TTL을 최초 1회만 건다', async () => {
-    const incr = jest.fn().mockReturnThis();
-    chain.incr = incr;
     exec.mockResolvedValue([
       [null, 7],
       [null, 1],
@@ -46,7 +56,7 @@ describe('SmsAuthStore', () => {
     await expect(store.increaseGlobalSendCount('2026-10-06T10')).resolves.toBe(
       7,
     );
-    expect(incr).toHaveBeenCalledWith('sms:auth:global:2026-10-06T10');
+    expect(chain.incr).toHaveBeenCalledWith('sms:auth:global:2026-10-06T10');
     expect(chain.expire).toHaveBeenCalledWith(
       'sms:auth:global:2026-10-06T10',
       7200,
@@ -57,38 +67,72 @@ describe('SmsAuthStore', () => {
   it('트랜잭션 명령이 실패하면 에러를 던진다', async () => {
     exec.mockResolvedValue([[new Error('OOM'), null]]);
 
-    await expect(store.increaseSendCount('010', 180)).rejects.toThrow('OOM');
+    await expect(
+      store.increaseGlobalSendCount('2026-10-06T10'),
+    ).rejects.toThrow('OOM');
   });
 
-  it('새 코드를 저장해도 시도 횟수는 초기화하지 않는다 (재발송으로 시도 횟수 리셋 방지)', async () => {
-    await store.saveCode('010', '1234');
+  it('새 코드는 같은 창일 때만 저장하고, 시도 횟수는 초기화하지 않는다 (재발송으로 시도 횟수 리셋 방지)', async () => {
+    redis.eval.mockResolvedValueOnce(0).mockResolvedValueOnce(null);
 
-    expect(redis.hset).toHaveBeenCalledWith('sms:auth:010', {
-      code: '1234',
-      verified: '0',
-    });
+    await expect(store.saveCode('010', 'w1', '1234')).resolves.toBe(true);
+    await expect(store.saveCode('010', 'w1', '1234')).resolves.toBe(false);
+    expect(redis.eval).toHaveBeenCalledWith(
+      IN_WINDOW_LUA,
+      1,
+      'sms:auth:010',
+      'w1',
+      'HSET',
+      'code',
+      '1234',
+      'verified',
+      '0',
+    );
   });
 
-  it('코드가 없으면 null, 있으면 상태를 파싱해 돌려준다', async () => {
+  it('코드나 창 토큰이 없으면 null, 있으면 상태를 파싱해 돌려준다', async () => {
     redis.hgetall.mockResolvedValueOnce({});
-    redis.hgetall.mockResolvedValueOnce({ code: '1234', verified: '1' });
+    redis.hgetall.mockResolvedValueOnce({ code: '1234', verified: '0' });
+    redis.hgetall.mockResolvedValueOnce({
+      code: '1234',
+      verified: '1',
+      window: 'w1',
+    });
 
+    await expect(store.find('010')).resolves.toBeNull();
     await expect(store.find('010')).resolves.toBeNull();
     await expect(store.find('010')).resolves.toEqual({
       code: '1234',
       verified: true,
+      window: 'w1',
     });
   });
 
-  it('검증 시도 횟수를 HINCRBY로 원자적으로 올린다', async () => {
-    redis.hincrby.mockResolvedValue(3);
+  it('검증 시도 횟수는 같은 창일 때만 HINCRBY로 올리고, 창이 없으면 null', async () => {
+    redis.eval.mockResolvedValueOnce(3).mockResolvedValueOnce(null);
 
-    await expect(store.increaseVerifyAttemptCount('010')).resolves.toBe(3);
-    expect(redis.hincrby).toHaveBeenCalledWith(
-      'sms:auth:010',
-      'verifyAttemptCount',
-      1,
+    await expect(store.increaseVerifyAttemptCount('010', 'w1')).resolves.toBe(
+      3,
     );
+    await expect(
+      store.increaseVerifyAttemptCount('010', 'w1'),
+    ).resolves.toBeNull();
+    expect(redis.eval).toHaveBeenCalledWith(
+      IN_WINDOW_LUA,
+      1,
+      'sms:auth:010',
+      'w1',
+      'HINCRBY',
+      'verifyAttemptCount',
+      '1',
+    );
+  });
+
+  it('인증 완료 표시는 같은 창일 때만 한다', async () => {
+    redis.eval.mockResolvedValueOnce(0).mockResolvedValueOnce(null);
+
+    await expect(store.markVerified('010', 'w1')).resolves.toBe(true);
+    await expect(store.markVerified('010', 'w1')).resolves.toBe(false);
   });
 });
 
@@ -206,5 +250,33 @@ describe('SmsEventDedupeStore', () => {
     await store.release('e1');
 
     expect(redis.del).toHaveBeenCalledWith('sms:event:e1');
+  });
+
+  it('SENDING/UNKNOWN은 완료 마커와 같은 7일 동안 남겨 선점 만료·재시작 뒤에도 재발송을 막는다', async () => {
+    await store.markSending('e1');
+    await store.markUnknown('e1');
+
+    expect(redis.set).toHaveBeenNthCalledWith(
+      1,
+      'sms:event:e1',
+      'sending',
+      'EX',
+      604800,
+    );
+    expect(redis.set).toHaveBeenNthCalledWith(
+      2,
+      'sms:event:e1',
+      'unknown',
+      'EX',
+      604800,
+    );
+  });
+
+  it('SENDING/UNKNOWN이 남은 이벤트의 선점은 unknown이다 (처리 중 대기와 구분)', async () => {
+    redis.set.mockResolvedValue(null);
+    redis.get.mockResolvedValueOnce('sending').mockResolvedValueOnce('unknown');
+
+    await expect(store.claim('e1')).resolves.toBe('unknown');
+    await expect(store.claim('e1')).resolves.toBe('unknown');
   });
 });

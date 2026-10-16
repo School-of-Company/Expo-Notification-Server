@@ -31,7 +31,9 @@ describe('QR SMS with real Kafka and Redis', () => {
   const producer = kafka.producer();
   const observer = kafka.consumer({ groupId: `${prefix}.observer` });
   const messages: { topic: string; key: string; value: unknown }[] = [];
-  const sender = { send: jest.fn().mockResolvedValue({ failedTo: [] }) };
+  const sender = {
+    deliver: jest.fn().mockResolvedValue({ kind: 'accepted', failedTo: [] }),
+  };
   const names = {
     findNames: jest.fn().mockResolvedValue(new Map()),
   };
@@ -139,7 +141,7 @@ describe('QR SMS with real Kafka and Redis', () => {
       messages.some((message) => message.key === payload.eventId),
     );
     expect(publish).toHaveBeenCalledTimes(8);
-    expect(sender.send).toHaveBeenCalledTimes(1);
+    expect(sender.deliver).toHaveBeenCalledTimes(1);
     expect(names.findNames).toHaveBeenCalledTimes(1);
     expect(messages).toEqual([
       {
@@ -168,19 +170,19 @@ describe('QR SMS with real Kafka and Redis', () => {
         (await redis.get(`sms:event:${trainee.eventId}`)) === 'done-v2',
     );
     expect(publish).toHaveBeenCalledTimes(8);
-    expect(sender.send).toHaveBeenCalledTimes(2);
+    expect(sender.deliver).toHaveBeenCalledTimes(2);
     expect(messages).toHaveLength(1);
   }, 30000);
 
   it('waits for a processing lease to expire, then sends once without DLQ', async () => {
     const payload = event('processing');
     await redis.set(`sms:event:${payload.eventId}`, 'processing', 'EX', 2);
-    const before = sender.send.mock.calls.length;
+    const before = sender.deliver.mock.calls.length;
     await emit(payload);
     await until(() =>
       messages.some((message) => message.key === payload.eventId),
     );
-    expect(sender.send).toHaveBeenCalledTimes(before + 1);
+    expect(sender.deliver).toHaveBeenCalledTimes(before + 1);
     expect(await redis.get(`sms:event-fail:${payload.eventId}`)).toBeNull();
     expect(
       messages.some(
@@ -191,8 +193,8 @@ describe('QR SMS with real Kafka and Redis', () => {
 
   it('moves send failures to DLQ and resets attempts for manual replay', async () => {
     const payload = event('dlq');
-    sender.send.mockResolvedValue({ failedTo: ['01012345678'] });
-    const before = sender.send.mock.calls.length;
+    sender.deliver.mockResolvedValue({ kind: 'rejected', code: '3059' });
+    const before = sender.deliver.mock.calls.length;
     await emit(payload);
     await until(() =>
       messages.some(
@@ -203,11 +205,11 @@ describe('QR SMS with real Kafka and Redis', () => {
       async () =>
         (await redis.exists(`sms:event-fail:${payload.eventId}`)) === 0,
     );
-    expect(sender.send).toHaveBeenCalledTimes(
+    expect(sender.deliver).toHaveBeenCalledTimes(
       before + config.sms.eventMaxAttempts,
     );
     expect(await redis.get(`sms:event:${payload.eventId}`)).toBeNull();
-    sender.send.mockResolvedValue({ failedTo: [] });
+    sender.deliver.mockResolvedValue({ kind: 'accepted', failedTo: [] });
     await emit(payload);
     await until(() =>
       messages.some(
@@ -216,14 +218,14 @@ describe('QR SMS with real Kafka and Redis', () => {
           message.topic === config.kafka.topics.qrSmsSent,
       ),
     );
-    expect(sender.send).toHaveBeenCalledTimes(
+    expect(sender.deliver).toHaveBeenCalledTimes(
       before + config.sms.eventMaxAttempts + 1,
     );
   }, 30000);
 
   it('does not publish a completion event for an HTTP-era done marker', async () => {
     const payload = event('legacy');
-    const before = sender.send.mock.calls.length;
+    const before = sender.deliver.mock.calls.length;
     const publishedBefore = publish.mock.calls.length;
     await redis.set(`sms:event:${payload.eventId}`, 'done', 'EX', 86400);
     await emit(payload);
@@ -234,7 +236,7 @@ describe('QR SMS with real Kafka and Redis', () => {
         (await redis.get(`sms:event:${barrier.eventId}`)) === 'done-v2',
     );
 
-    expect(sender.send).toHaveBeenCalledTimes(before + 1);
+    expect(sender.deliver).toHaveBeenCalledTimes(before + 1);
     expect(publish).toHaveBeenCalledTimes(publishedBefore);
     expect(await redis.get(`sms:event:${payload.eventId}`)).toBe('done');
   }, 30000);

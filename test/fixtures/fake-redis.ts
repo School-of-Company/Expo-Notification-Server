@@ -1,3 +1,5 @@
+import { IN_WINDOW_LUA, OPEN_WINDOW_LUA } from '../../src/sms/sms-auth.store';
+
 type Hash = Record<string, string>;
 
 export class FakeRedis {
@@ -79,6 +81,38 @@ export class FakeRedis {
 
   del(key: string): Promise<number> {
     return Promise.resolve(this.strings.delete(key) ? 1 : 0);
+  }
+
+  // 만료가 없으므로 SMS 인증 창 스크립트의 창 토큰 비교만 흉내 낸다. TTL 경합은 실제 Redis 통합 테스트가 본다.
+  eval(
+    script: string,
+    _numKeys: number,
+    key: string,
+    ...args: Array<string | number>
+  ): Promise<unknown> {
+    const [first, second, ...rest] = args.map(String);
+    if (script === OPEN_WINDOW_LUA) {
+      if (!this.hashes.get(key)?.window) {
+        this.hashes.set(key, { window: second });
+      }
+      const hash = this.hash(key);
+      hash.sendCount = String(Number(hash.sendCount ?? 0) + 1);
+      return Promise.resolve([Number(hash.sendCount), hash.window]);
+    }
+    if (script === IN_WINDOW_LUA) {
+      if (this.hashes.get(key)?.window !== first) {
+        return Promise.resolve(null);
+      }
+      if (second === 'HINCRBY') {
+        return this.hincrby(key, rest[0], Number(rest[1]));
+      }
+      const values: Hash = {};
+      for (let i = 0; i < rest.length; i += 2) {
+        values[rest[i]] = rest[i + 1];
+      }
+      return this.hset(key, values);
+    }
+    throw new Error('FakeRedis.eval: unsupported script');
   }
 
   smembers(key: string): Promise<string[]> {
