@@ -64,6 +64,38 @@ describe('promotion boundary contracts', () => {
       }).success,
     ).toBe(false);
   });
+  it('limits only location to 255 code points while retaining label validation', () => {
+    expect(
+      promotionCheckSchema.safeParse({
+        ...response,
+        location: '😀'.repeat(255),
+      }).success,
+    ).toBe(true);
+    expect(
+      promotionCheckSchema.safeParse({
+        ...response,
+        location: '😀'.repeat(256),
+      }).success,
+    ).toBe(false);
+    expect(
+      promotionCheckSchema.safeParse({
+        ...response,
+        location: 'location\nother',
+      }).success,
+    ).toBe(false);
+    expect(
+      promotionCheckSchema.safeParse({
+        ...response,
+        participantName: 'a'.repeat(101),
+      }).success,
+    ).toBe(false);
+    expect(
+      promotionCheckSchema.safeParse({
+        ...response,
+        programName: 'a'.repeat(101),
+      }).success,
+    ).toBe(false);
+  });
   it('keeps feature disabled by default and defaults the expo name', () => {
     const config = createAppConfig();
     expect(appConfigSchema.parse(config).promotion).toBeUndefined();
