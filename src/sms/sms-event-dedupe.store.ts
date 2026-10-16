@@ -8,7 +8,8 @@ const DONE_SECONDS = 60 * 60 * 24 * 7;
 const key = (eventId: string) => `sms:event:${eventId}`;
 const publishedKey = (eventId: string) => `sms:event-published:${eventId}`;
 
-export type ClaimResult = 'claimed' | 'in-progress' | 'done' | 'legacy-done';
+export type ClaimResult =
+  'claimed' | 'in-progress' | 'done' | 'legacy-done' | 'unknown';
 
 @Injectable()
 export class SmsEventDedupeStore {
@@ -34,6 +35,9 @@ export class SmsEventDedupeStore {
             return 'legacy-done';
           case 'done-v2':
             return 'done';
+          case 'sending':
+          case 'unknown':
+            return 'unknown';
           default:
             return 'in-progress';
         }
@@ -48,6 +52,16 @@ export class SmsEventDedupeStore {
 
   async markPublished(eventId: string): Promise<void> {
     await this.redis.set(publishedKey(eventId), '1', 'EX', DONE_SECONDS);
+  }
+
+  // 공급자 호출 직전 기록. 선점(5분)과 달리 완료 마커만큼 남겨, 재시작·선점 만료 뒤에도 자동 재발송을 막는다.
+  // ponytail: 소유자 토큰 없이 덮어쓴다 — 발송 전 단계(이름 조회 등)가 선점 5분 안에 끝난다는 전제. 넘길 수 있으면 토큰 비교(Lua)로 바꾼다.
+  async markSending(eventId: string): Promise<void> {
+    await this.redis.set(key(eventId), 'sending', 'EX', DONE_SECONDS);
+  }
+
+  async markUnknown(eventId: string): Promise<void> {
+    await this.redis.set(key(eventId), 'unknown', 'EX', DONE_SECONDS);
   }
 
   async complete(eventId: string): Promise<void> {

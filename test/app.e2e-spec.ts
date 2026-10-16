@@ -10,6 +10,10 @@ import { KAFKA_CLIENT } from '../src/kafka/kafka.constants';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
 import { SOLAPI_CLIENT } from '../src/sms/sms.constants';
 import { createAppConfig } from './fixtures/app-config.fixture';
+import {
+  isSolapiUrl,
+  solapiSendManyResponse,
+} from './fixtures/solapi-fetch.fixture';
 import { FakeRedis } from './fixtures/fake-redis';
 
 const config = createAppConfig();
@@ -48,18 +52,22 @@ describe('Notification server (e2e)', () => {
     config.sms = createAppConfig().sms;
     handlers.clear();
     solapiSend = jest.fn().mockResolvedValue({ failedMessageList: [] });
-    fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation((input) =>
-      Promise.resolve(
-        urlOf(input).endsWith('/internal/standard-participants/names')
-          ? ({
-              ok: true,
-              status: 200,
-              json: () =>
-                Promise.resolve([{ participantId: 42, name: '홍길동' }]),
-            } as Response)
-          : ({ ok: true, status: 204 } as Response),
-      ),
-    );
+    fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) =>
+        isSolapiUrl(input)
+          ? solapiSendManyResponse(init, solapiSend)
+          : Promise.resolve(
+              urlOf(input).endsWith('/internal/standard-participants/names')
+                ? ({
+                    ok: true,
+                    status: 200,
+                    json: () =>
+                      Promise.resolve([{ participantId: 42, name: '홍길동' }]),
+                  } as Response)
+                : ({ ok: true, status: 204 } as Response),
+            ),
+      );
 
     producerSend = jest.fn();
     const fakeKafka = {
@@ -443,8 +451,10 @@ describe('Notification server (e2e)', () => {
       expect(sentEvents()).toHaveLength(0);
     });
 
-    it('SMS가 실패하면 문자 완료 이벤트 없이 던진 뒤, 재전달되면 다시 시도한다', async () => {
-      solapiSend.mockRejectedValueOnce(new Error('gateway failed'));
+    it('SMS가 명시적으로 거부되면 문자 완료 이벤트 없이 던진 뒤, 재전달되면 다시 시도한다', async () => {
+      solapiSend.mockResolvedValueOnce({
+        failedMessageList: [{ to: '01012345678' }],
+      });
 
       await expect(emit(registeredGroup, registered)).rejects.toThrow();
       expect(solapiSend).toHaveBeenCalledTimes(1);
@@ -453,6 +463,28 @@ describe('Notification server (e2e)', () => {
       await emit(registeredGroup, registered);
       expect(solapiSend).toHaveBeenCalledTimes(2);
       expect(sentEvents()).toHaveLength(1);
+    });
+
+    it('접수 결과를 모르면(응답 유실) 완료 이벤트 없이 원본을 DLQ에 보관하고 재전달돼도 다시 보내지 않는다', async () => {
+      solapiSend.mockRejectedValueOnce(new Error('socket hang up'));
+
+      await expect(emit(registeredGroup, registered)).resolves.toBeUndefined();
+      await expect(emit(registeredGroup, registered)).resolves.toBeUndefined();
+
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+      expect(sentEvents()).toHaveLength(0);
+      expect(producerSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          topic: config.kafka.topics.smsDeadLetter,
+          messages: [
+            expect.objectContaining({
+              headers: expect.objectContaining({
+                'x-sms-delivery': 'UNKNOWN',
+              }) as unknown,
+            }),
+          ],
+        }),
+      );
     });
 
     it('발행이 실패해도 재전달 때 문자는 다시 보내지 않고 발행만 다시 시도한다', async () => {

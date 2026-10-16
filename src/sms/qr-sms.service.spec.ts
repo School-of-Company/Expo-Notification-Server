@@ -3,6 +3,10 @@ import { APP_CONFIG } from '../config/app-config.constants';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import { FakeRedis } from '../../test/fixtures/fake-redis';
+import {
+  isSolapiUrl,
+  solapiSendManyResponse,
+} from '../../test/fixtures/solapi-fetch.fixture';
 import type { ParticipantRegisteredEvent } from './participant-event.schema';
 import { ParticipantNamesProvider } from './participant-names.provider';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
@@ -11,6 +15,8 @@ import {
   EventInProgressError,
   QrLinkError,
   SentEventPublishError,
+  SmsDeliveryRejectedError,
+  SmsDeliveryUnknownError,
 } from './sms-errors';
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
 import { SmsEventGuard } from './sms-event.guard';
@@ -36,7 +42,15 @@ describe('QrSmsService', () => {
     [OutgoingSms[]]
   >();
   const publish = jest.fn<Promise<void>, [unknown]>();
-  const fetchSpy = jest.spyOn(globalThis, 'fetch');
+  // 이름 조회 응답만 흉내 낸다. Solapi 호출은 아래 globalFetch가 send 가짜로 돌린다 (실제 접속 없음).
+  const fetchSpy = jest.fn<Promise<Response>, Parameters<typeof fetch>>();
+  const globalFetch = jest
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation((input, init) =>
+      isSolapiUrl(input)
+        ? solapiSendManyResponse(init, send)
+        : fetchSpy(input, init),
+    );
 
   beforeEach(async () => {
     config.sms = { ...createAppConfig().sms };
@@ -64,7 +78,7 @@ describe('QrSmsService', () => {
     service = module.get(QrSmsService);
     store = module.get(SmsEventDedupeStore);
   });
-  afterAll(() => fetchSpy.mockRestore());
+  afterAll(() => globalFetch.mockRestore());
   const text = () => send.mock.calls[0]?.[0][0]?.text ?? '';
 
   it('1명 링크를 대표자 번호로 한 통 보내고 개인정보 없는 완료 이벤트를 발행한다', async () => {
@@ -205,12 +219,12 @@ describe('QrSmsService', () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
-  it('SMS 실패 후 재전달은 다시 보내며 성공 전에는 완료를 기록하지 않는다', async () => {
+  it('SMS 명시적 거부 후 재전달은 다시 보내며 성공 전에는 완료를 기록하지 않는다', async () => {
     send.mockResolvedValueOnce({
       failedMessageList: [{ to: standard.phoneNumber }],
     });
-    await expect(service.handle(standard)).rejects.toThrow(
-      'qr sms delivery failed',
+    await expect(service.handle(standard)).rejects.toBeInstanceOf(
+      SmsDeliveryRejectedError,
     );
     expect(publish).not.toHaveBeenCalled();
     expect(await redis.get('sms:event:e1')).toBeNull();
@@ -219,12 +233,26 @@ describe('QrSmsService', () => {
     expect(publish).toHaveBeenCalledTimes(1);
   });
 
-  it('게이트웨이 요청 예외도 선점을 풀고 발행하지 않는다', async () => {
-    send.mockRejectedValue(new Error('private gateway body'));
-    await expect(service.handle(standard)).rejects.toThrow(
-      'sms gateway request failed',
+  it('접수 후 응답 유실은 UNKNOWN으로 남기고 재전달돼도 문자·완료 발행을 하지 않는다', async () => {
+    send.mockRejectedValue(new Error('socket hang up after accept'));
+    await expect(service.handle(standard)).rejects.toBeInstanceOf(
+      SmsDeliveryUnknownError,
     );
-    expect(await redis.get('sms:event:e1')).toBeNull();
+    expect(await redis.get('sms:event:e1')).toBe('unknown');
+    await expect(service.handle(standard)).rejects.toBeInstanceOf(
+      SmsDeliveryUnknownError,
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('SENDING 기록만 남고 프로세스가 죽은 이벤트도 재시작 후 다시 보내지 않는다', async () => {
+    await redis.set('sms:event:e1', 'sending');
+    await expect(service.handle(standard)).rejects.toBeInstanceOf(
+      SmsDeliveryUnknownError,
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
   });
 
