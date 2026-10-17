@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { deepMerge } from './deep-merge';
 import { AppConfig, appConfigSchema } from './app-config';
 
@@ -143,6 +144,24 @@ function configFromEnv(env: Env): Record<string, unknown> {
   };
 }
 
+// 운영 서버는 .env만 읽어서 알림톡 설정(templateId 목록)은 JSON 파일로 받는다.
+function kakaoFromFile(env: Env): Record<string, unknown> {
+  const path = env.KAKAO_CONFIG_FILE;
+  if (!path) {
+    return {};
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new Error(`invalid KAKAO_CONFIG_FILE (${path})`);
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new Error(`invalid KAKAO_CONFIG_FILE (${path})`);
+  }
+  return body as Record<string, unknown>;
+}
+
 // config-server Basic 인증(Expo-Config-Server#54). 사용자 이름은 조회하는 서비스 식별자다.
 // 비밀번호가 없으면 헤더 없이 호출해 인증을 켜기 전의 config-server 와도 동작한다.
 function basicAuthHeader(
@@ -197,7 +216,7 @@ export async function loadConfig(
 ): Promise<AppConfig> {
   const remote = await fetchRemoteConfig(env, fetchImpl);
   const result = appConfigSchema.safeParse(
-    deepMerge(configFromEnv(env), remote),
+    deepMerge(deepMerge(configFromEnv(env), kakaoFromFile(env)), remote),
   );
   if (!result.success) {
     const issues = result.error.issues

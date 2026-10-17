@@ -16,6 +16,10 @@ const serviceClient = z.object({
 
 const kakaoVariableMapping = z
   .object({
+    expoName: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
     name: z
       .string()
       .regex(/^#\{[^{}]+\}$/)
@@ -29,6 +33,10 @@ const kakaoVariableMapping = z
       .regex(/^#\{[^{}]+\}$/)
       .optional(),
     location: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
+    status: z
       .string()
       .regex(/^#\{[^{}]+\}$/)
       .optional(),
@@ -93,12 +101,31 @@ const baseAppConfigSchema = z.object({
     authMaxSendCountPerHour: z.coerce.number().int().positive().default(300),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),
     expoName: z.string().min(1).default('AI 미래교육 페스타'),
-    contactStandardNumber: z.string().min(1).optional(),
-    contactTraineeNumber: z.string().min(1).optional(),
+    // 카카오 K2 템플릿은 문의 줄을 뺄 수 없어 필수다.
+    contactStandardNumber: z.string().min(1),
+    contactTraineeNumber: z.string().min(1),
     qrUrlTemplate: z.string().trim().optional(),
     traineeQrUrlTemplate: z.string().trim().optional(),
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
   }),
+  // 자동 발송 알림톡 templateId. 키가 없는 메시지는 문자로만 나간다. 문구는 sms-message.templates.ts 상수에 있다.
+  kakao: z
+    .object({
+      pfId: z.string().min(1).optional(),
+      auto: z
+        .object({
+          authCode: z.string().min(1).optional(),
+          qrRegistered: z.string().min(1).optional(),
+          promotion: z.string().min(1).optional(),
+          drawResult: z.string().min(1).optional(),
+        })
+        .prefault({}),
+    })
+    .refine(
+      (kakao) => kakao.pfId || Object.values(kakao.auto).every((id) => !id),
+      { path: ['pfId'], message: 'pfId is required when a template is set' },
+    )
+    .optional(),
   user: serviceClient.optional(),
   expo: serviceClient.optional(),
   promotion: z

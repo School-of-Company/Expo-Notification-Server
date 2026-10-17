@@ -8,6 +8,7 @@ import {
   UsePipes,
 } from '@nestjs/common';
 import { z } from 'zod';
+import { expoIdSchema } from '../common/expo-name.provider';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { SmsAuthService } from './sms-auth.service';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -15,7 +16,10 @@ import { SendCodeDto, VerifyCodeDto } from './sms-auth.dto';
 
 const phoneNumber = z.string().regex(/^01\d{8,9}$/);
 
-const sendCodeSchema = z.object({ phoneNumber });
+const sendCodeSchema = z.object({
+  phoneNumber,
+  expoId: expoIdSchema.optional(),
+});
 const verifyCodeSchema = z.object({
   phoneNumber,
   code: z.string().regex(/^\d{4}$/),
@@ -46,7 +50,7 @@ export class SmsController {
   @HttpCode(200)
   @UsePipes(new ZodValidationPipe(sendCodeSchema))
   async sendCode(@Body() body: SendCodeDto): Promise<void> {
-    await this.smsAuthService.sendCode(body.phoneNumber);
+    await this.smsAuthService.sendCode(body.phoneNumber, body.expoId);
   }
 
   @Post('verify')

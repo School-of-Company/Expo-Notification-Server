@@ -14,6 +14,22 @@ describe('smsEventSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('DRAW_RESULT의 expoId는 선택이고 형식이 틀리면 거부한다', () => {
+    const draw = {
+      ...base,
+      type: 'DRAW_RESULT',
+      phoneNumber: '01012345678',
+      drawNumber: 3,
+    };
+
+    expect(
+      smsEventSchema.safeParse({ ...draw, expoId: 'expo-1' }).data,
+    ).toMatchObject({ expoId: 'expo-1' });
+    expect(smsEventSchema.safeParse({ ...draw, expoId: '../x' }).success).toBe(
+      false,
+    );
+  });
+
   it('더 이상 지원하지 않는 QR_ISSUED/SURVEY_REQUESTED는 거부한다 (User/Attention 이벤트로 대체)', () => {
     for (const type of ['QR_ISSUED', 'SURVEY_REQUESTED']) {
       expect(smsEventSchema.safeParse({ ...base, type }).success).toBe(false);

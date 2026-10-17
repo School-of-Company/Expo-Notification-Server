@@ -49,7 +49,11 @@ describe('promotion HTTP/Kafka/Redis contracts with synthetic SMS', () => {
     );
     expect(runtime.http.sms[0]?.text).toContain('미래 수업');
     expect(runtime.http.sms[0]?.text).toContain('10:00');
-    expect(runtime.http.sms[0]?.text).not.toMatch(/장소:|신청 조회:|확정 버튼/);
+    expect(runtime.http.sms[0]?.text).toContain('장소: 추후 안내');
+    expect(runtime.http.sms[0]?.text).toContain(
+      '신청 조회: 신청시스템에서 확인해 주세요',
+    );
+    expect(runtime.http.sms[0]?.text).not.toMatch(/확정 버튼/);
     expect((await runtime.store.get(first.eventId))?.status).toBe('ACCEPTED');
     expect(
       await runtime.redis.ttl(

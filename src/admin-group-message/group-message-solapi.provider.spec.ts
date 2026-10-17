@@ -41,69 +41,94 @@ describe('admin group message Solapi transport', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('maps semantic variables only through configured approved Kakao names', async () => {
-    const config = createAppConfig({
-      adminGroupMessaging: {
-        enabled: true,
-        internalToken: 'g'.repeat(32),
-        previewTtlSeconds: 1800,
-        authorizationTtlSeconds: 300,
-        retentionSeconds: 2592000,
-        kakao: {
+  it.each([
+    ['예전 job(필드 없음)', undefined, true],
+    ['대체 발송 끔', false, true],
+    ['대체 발송 켬', true, false],
+  ])(
+    'maps semantic variables only through configured approved Kakao names: %s',
+    async (_, fallbackToSms, disableSms) => {
+      const config = createAppConfig({
+        adminGroupMessaging: {
           enabled: true,
-          pfId: 'pf-id',
-          templates: [
-            {
-              id: 'approved-1',
-              name: '승인 안내',
-              providerTemplateId: 'provider-template',
-              content: '#{이름}님의 #{프로그램} 안내',
-              variableMapping: { name: '#{이름}', programName: '#{프로그램}' },
-            },
-          ],
-        },
-      },
-    });
-    const fetch = jest.spyOn(global, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          groupInfo: {
-            groupId: 'group-1',
-            count: { registeredSuccess: 1, registeredFailed: 0 },
-          },
-          failedMessageList: [],
-          messageList: [{ messageId: 'message-1', statusCode: '2000' }],
-        }),
-      ),
-    );
-    const provider = new GroupMessageSolapiProvider(config);
-    await expect(
-      provider.send(
-        { ...job, channel: 'KAKAO', templateId: 'approved-1' },
-        target,
-      ),
-    ).resolves.toEqual({
-      kind: 'accepted',
-      groupId: 'group-1',
-      messageId: 'message-1',
-    });
-    const init = fetch.mock.calls[0]?.[1];
-    if (typeof init?.body !== 'string') throw new Error('missing JSON request');
-    const body: unknown = JSON.parse(init.body);
-    expect(body).toMatchObject({
-      messages: [
-        {
-          kakaoOptions: {
+          internalToken: 'g'.repeat(32),
+          previewTtlSeconds: 1800,
+          authorizationTtlSeconds: 300,
+          retentionSeconds: 2592000,
+          kakao: {
+            enabled: true,
             pfId: 'pf-id',
-            templateId: 'provider-template',
-            variables: { '#{이름}': '김학생', '#{프로그램}': '미래 수업' },
-            disableSms: true,
+            templates: [
+              {
+                id: 'approved-1',
+                name: '승인 안내',
+                providerTemplateId: 'provider-template',
+                content: '[#{행사명}] #{이름}님의 #{프로그램} #{상태} 안내',
+                variableMapping: {
+                  expoName: '#{행사명}',
+                  name: '#{이름}',
+                  programName: '#{프로그램}',
+                  status: '#{상태}',
+                },
+              },
+            ],
           },
         },
-      ],
-      allowDuplicates: false,
-    });
-  });
+      });
+      const fetch = jest.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            groupInfo: {
+              groupId: 'group-1',
+              count: { registeredSuccess: 1, registeredFailed: 0 },
+            },
+            failedMessageList: [],
+            messageList: [{ messageId: 'message-1', statusCode: '2000' }],
+          }),
+        ),
+      );
+      const provider = new GroupMessageSolapiProvider(config);
+      await expect(
+        provider.send(
+          { ...job, channel: 'KAKAO', templateId: 'approved-1', fallbackToSms },
+          {
+            ...target,
+            templateVariables: {
+              ...target.templateVariables,
+              expoName: '광주 박람회',
+              status: '대기',
+            },
+          },
+        ),
+      ).resolves.toEqual({
+        kind: 'accepted',
+        groupId: 'group-1',
+        messageId: 'message-1',
+      });
+      const init = fetch.mock.calls[0]?.[1];
+      if (typeof init?.body !== 'string')
+        throw new Error('missing JSON request');
+      const body: unknown = JSON.parse(init.body);
+      expect(body).toMatchObject({
+        messages: [
+          {
+            kakaoOptions: {
+              pfId: 'pf-id',
+              templateId: 'provider-template',
+              variables: {
+                '#{행사명}': '광주 박람회',
+                '#{이름}': '김학생',
+                '#{프로그램}': '미래 수업',
+                '#{상태}': '대기',
+              },
+              disableSms,
+            },
+          },
+        ],
+        allowDuplicates: false,
+      });
+    },
+  );
 
   it('does not trust empty receipt IDs or contradictory provider counts', async () => {
     const fetch = jest.spyOn(global, 'fetch').mockResolvedValue(

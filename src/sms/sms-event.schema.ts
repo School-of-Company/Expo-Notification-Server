@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { expoIdSchema } from '../common/expo-name.provider';
 
 const phoneNumber = z.string().regex(/^01\d{8,9}$/);
 const senderType = z.enum(['STANDARD', 'TRAINEE']);
@@ -14,6 +15,8 @@ export const smsEventSchema = z.discriminatedUnion('type', [
     type: z.literal('DRAW_RESULT'),
     phoneNumber,
     drawNumber: z.number().int().nonnegative(),
+    // K4 문구에는 행사명이 없어 아직 쓰지 않는다. Form이 보내도 거절하지 않도록 받는다.
+    expoId: expoIdSchema.optional(),
   }),
   z.object({
     ...base,
