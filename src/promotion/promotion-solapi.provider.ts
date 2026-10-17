@@ -4,7 +4,6 @@ import { APP_CONFIG } from '../config/app-config.constants';
 import { solapiRequest } from '../sms/solapi-request';
 import type { AppConfig } from '../config/app-config';
 import type { OutgoingSms } from '../sms/sms-sender.provider';
-import type { PromotionRecord } from './promotion.schema';
 
 const receiptSchema = z.object({
   groupInfo: z.object({
@@ -38,6 +37,12 @@ const resultSchema = z.object({
     }),
   ),
 });
+// Only the identifiers sent as customFields matter here, so participation offers (#144) reuse this transport.
+export type SolapiAttempt = {
+  readonly event: { readonly eventId: string };
+  readonly attemptId?: string;
+  readonly groupId?: string;
+};
 export type PromotionReceipt =
   | {
       readonly kind: 'accepted';
@@ -62,7 +67,7 @@ export class PromotionSolapiProvider {
   }
 
   async send(
-    record: PromotionRecord,
+    record: SolapiAttempt,
     message: OutgoingSms,
   ): Promise<PromotionReceipt> {
     try {
@@ -114,7 +119,7 @@ export class PromotionSolapiProvider {
   }
 
   async delivery(
-    record: PromotionRecord,
+    record: SolapiAttempt,
     messageId: string,
   ): Promise<PromotionDelivery | null> {
     try {

@@ -108,6 +108,8 @@ describe.each([
             '/internal/admin-group-messages/previews/{previewId}/jobs',
             '/internal/promotion-notifications/{eventId}',
             '/internal/promotion-notifications/{eventId}/reconciliation',
+            '/internal/promotion-offer-notifications/{eventId}',
+            '/internal/promotion-offer-notifications/{eventId}/reconciliation',
           ]
         : [],
     );
