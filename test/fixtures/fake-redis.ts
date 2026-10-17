@@ -71,6 +71,10 @@ export class FakeRedis {
     return Promise.resolve(this.strings.get(key) ?? null);
   }
 
+  mget(keys: string[]): Promise<(string | null)[]> {
+    return Promise.resolve(keys.map((key) => this.strings.get(key) ?? null));
+  }
+
   exists(key: string): Promise<number> {
     return Promise.resolve(
       this.strings.has(key) || this.hashes.has(key) || this.sets.has(key)

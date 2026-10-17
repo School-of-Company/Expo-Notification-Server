@@ -56,13 +56,11 @@ function configFromEnv(env: Env): Record<string, unknown> {
       brokers: env.KAFKA_BROKERS,
       clientId: env.KAFKA_CLIENT_ID,
       smsGroupId: env.KAFKA_SMS_GROUP_ID,
-      alarmGroupId: env.KAFKA_ALARM_GROUP_ID,
       topics: pickDefined({
         smsRequested: env.KAFKA_SMS_REQUESTED_TOPIC,
         smsDeadLetter: env.KAFKA_SMS_DEAD_LETTER_TOPIC,
         qrSmsSent: env.KAFKA_QR_SMS_SENT_TOPIC,
         participantRegistered: env.KAFKA_PARTICIPANT_REGISTERED_TOPIC,
-        expoApplicantCount: env.KAFKA_EXPO_APPLICANT_COUNT_TOPIC,
       }),
     }),
     redis: pickDefined({
@@ -90,6 +88,12 @@ function configFromEnv(env: Env): Record<string, unknown> {
       user: pickDefined({
         baseUrl: env.USER_SERVICE_URL,
         internalToken: env.USER_SERVICE_INTERNAL_TOKEN,
+      }),
+    }),
+    ...((env.EXPO_SERVICE_URL || env.EXPO_SERVICE_INTERNAL_TOKEN) && {
+      expo: pickDefined({
+        baseUrl: env.EXPO_SERVICE_URL,
+        internalToken: env.EXPO_SERVICE_INTERNAL_TOKEN,
       }),
     }),
     ...eurekaFromEnv(env),

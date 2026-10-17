@@ -18,6 +18,22 @@ import { FakeRedis } from './fixtures/fake-redis';
 
 const config = createAppConfig();
 
+let registeredParticipantCount = 30;
+const jsonResponse = (body: unknown) =>
+  ({ ok: true, status: 200, json: () => Promise.resolve(body) }) as Response;
+const internalResponse = (url: string): Response => {
+  if (url.endsWith('/internal/standard-participants/names'))
+    return jsonResponse([{ participantId: 42, name: '홍길동' }]);
+  if (url.includes('/internal/expo?'))
+    return jsonResponse({
+      content: [{ expoId: 'expo-1', title: '광주 박람회' }],
+      hasNext: false,
+    });
+  if (url.endsWith('/internal/expos/expo-1/participant-stats'))
+    return jsonResponse({ expoId: 'expo-1', registeredParticipantCount });
+  return { ok: true, status: 204 } as Response;
+};
+
 type FetchInput = Parameters<typeof fetch>[0];
 const urlOf = (input: FetchInput): string =>
   typeof input === 'string'
@@ -57,16 +73,7 @@ describe('Notification server (e2e)', () => {
       .mockImplementation((input, init) =>
         isSolapiUrl(input)
           ? solapiSendManyResponse(init, solapiSend)
-          : Promise.resolve(
-              urlOf(input).endsWith('/internal/standard-participants/names')
-                ? ({
-                    ok: true,
-                    status: 200,
-                    json: () =>
-                      Promise.resolve([{ participantId: 42, name: '홍길동' }]),
-                  } as Response)
-                : ({ ok: true, status: 204 } as Response),
-            ),
+          : Promise.resolve(internalResponse(urlOf(input))),
       );
 
     producerSend = jest.fn();
@@ -525,44 +532,39 @@ describe('Notification server (e2e)', () => {
 
     it('입장 설문 문자 consumer를 시작하지 않는다', () => {
       expect([...handlers.keys()].sort()).toEqual(
-        [
-          config.kafka.smsGroupId,
-          registeredGroup,
-          config.kafka.alarmGroupId,
-        ].sort(),
+        [config.kafka.smsGroupId, registeredGroup].sort(),
       );
       expect(solapiSend).not.toHaveBeenCalled();
     });
   });
 
   describe('등록 인원 알람', () => {
-    it('이벤트로 쌓은 인원을 리포트로 Discord에 보내고, 자정 스냅샷 후엔 증가분이 0이 된다', async () => {
-      await emit(config.kafka.alarmGroupId, {
-        eventId: 'c1',
-        version: 1,
-        expoId: 'expo-1',
-        expoTitle: '광주 박람회',
-        applicationPerson: 30,
-      });
+    it('이벤트 없이 내부 API로 조회한 인원을 Discord에 보내고, 자정 스냅샷 후엔 증가분만 보인다 (#54)', async () => {
+      registeredParticipantCount = 30;
       const alarm = app.get(AlarmReportService);
+      const discordCalls = () =>
+        (fetchSpy.mock.calls as Parameters<typeof fetch>[]).filter(
+          ([input]) => urlOf(input) === config.discord.participantNumberUrl,
+        );
 
       await alarm.sendParticipantNumberReport();
 
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      const [url] = fetchSpy.mock.calls[0] as [string];
-      expect(url).toBe(config.discord.participantNumberUrl);
-      const fields = embedFields(fetchSpy.mock.calls[0] as unknown[]);
+      expect(discordCalls()).toHaveLength(1);
+      const fields = embedFields(discordCalls()[0]);
+      expect(fields[0].value).toBe('광주 박람회');
       expect(fields[1].value).toBe('0');
       expect(fields[2].value).toBe('30');
       expect(fields[3].value).toBe('+30');
 
       await alarm.saveYesterdayApplicantCount();
+      registeredParticipantCount = 33;
       fetchSpy.mockClear();
       await alarm.sendParticipantNumberReport();
 
-      const next = embedFields(fetchSpy.mock.calls[0] as unknown[]);
+      const next = embedFields(discordCalls()[0]);
       expect(next[1].value).toBe('30');
-      expect(next[3].value).toBe('+0');
+      expect(next[2].value).toBe('33');
+      expect(next[3].value).toBe('+3');
     });
   });
 

@@ -3,10 +3,10 @@
 ## Project Overview
 
 `expo-notification-server` is the notification server for the Expo (startup expo project) MSA.
-It owns two things, both fed by Kafka events from the other services:
+It owns two things, fed by Kafka events and internal APIs of the other services:
 
 - **sms** — sends SMS through Solapi (CoolSMS) from Kafka events: User's registration event → individual Client /qr links in one SMS (optional User name lookup, then publishes `notification.qr-sms.sent` for the representative), plus generic `notification.sms.requested` (failures past `sms.eventMaxAttempts` go to a DLQ topic), plus the HTTP phone-verification code flow (`POST /sms`, `POST /sms/verify`) with per-number and hourly global send caps
-- **alarm** — keeps per-expo registration counts in Redis and reports them to Discord hourly (KST), snapshotting "yesterday" at 00:00:30
+- **alarm** — hourly (KST) reads active expos from Expo's internal API and each expo's registered count from User's internal API, reports them to Discord, and snapshots "yesterday" counts in Redis at 00:00:30
 
 Registers with Eureka as `expo-notification-server` when `eureka.serviceUrl` is set. Settings come from the config server (`GET /configs/notification/:profile`), falling back to env. See
 `docs/events-and-config.md` for the event contract and config keys.
@@ -50,7 +50,7 @@ expo-notification-server/
 │   ├── redis/         # shared Redis client (REDIS_CLIENT token)
 │   ├── common/        # zod pipe, kafka JSON parsing, phone masking
 │   ├── sms/           # controller (verify code), consumer (events), services, stores, Solapi provider
-│   └── alarm/         # consumer (applicant count), scheduler, report service, Discord provider
+│   └── alarm/         # scheduler, report service, internal-API count provider, Discord provider
 ├── test/              # e2e specs + fixtures (fake Redis, app-config fixture)
 └── docs/events-and-config.md
 ```
@@ -59,13 +59,13 @@ expo-notification-server/
 
 ## Agent Routing
 
-| Task | Agent |
-|------|-------|
-| Add new feature | `feature-agent` |
-| Fix a bug | `fix-agent` |
-| Write tests | `test-agent` |
-| Code review | `review-agent` |
-| Write PR description | `pr-agent` |
+| Task                  | Agent            |
+| --------------------- | ---------------- |
+| Add new feature       | `feature-agent`  |
+| Fix a bug             | `fix-agent`      |
+| Write tests           | `test-agent`     |
+| Code review           | `review-agent`   |
+| Write PR description  | `pr-agent`       |
 | Apply review feedback | `feedback-agent` |
 
 ---
