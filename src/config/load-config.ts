@@ -111,6 +111,21 @@ function configFromEnv(env: Env): Record<string, unknown> {
         }),
       },
     }),
+    ...((env.PROMOTION_OFFER_APPLICATION_URL ||
+      env.PROMOTION_OFFER_ENABLED) && {
+      promotionOffer: {
+        ...pickDefined({
+          enabled: env.PROMOTION_OFFER_ENABLED,
+          internalToken: env.PROMOTION_OFFER_INTERNAL_TOKEN,
+          topic: env.KAFKA_PROMOTION_OFFER_TOPIC,
+          groupId: env.KAFKA_PROMOTION_OFFER_GROUP_ID,
+        }),
+        application: pickDefined({
+          baseUrl: env.PROMOTION_OFFER_APPLICATION_URL,
+          internalToken: env.PROMOTION_OFFER_APPLICATION_INTERNAL_TOKEN,
+        }),
+      },
+    }),
     ...((env.ADMIN_GROUP_MESSAGING_ENABLED ||
       env.ADMIN_GROUP_MESSAGING_INTERNAL_TOKEN) && {
       adminGroupMessaging: pickDefined({

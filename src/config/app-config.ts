@@ -115,6 +115,24 @@ const baseAppConfigSchema = z.object({
       groupId: z.string().min(1).default('expo-notification-server.promotion'),
     })
     .optional(),
+  // #144 participation offers: a separate topic and contract from the completed-promotion notice above.
+  promotionOffer: z
+    .object({
+      enabled: z
+        .union([
+          z.boolean(),
+          z.enum(['true', 'false']).transform((value) => value === 'true'),
+        ])
+        .default(false),
+      application: serviceClient,
+      internalToken: z.string().min(32),
+      topic: z.string().min(1).default('application.promotion-offer.requested'),
+      groupId: z
+        .string()
+        .min(1)
+        .default('expo-notification-server.promotion-offer'),
+    })
+    .optional(),
   adminGroupMessaging: z
     .object({
       enabled: z
