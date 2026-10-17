@@ -1,9 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { ApplicantCountProvider } from './applicant-count.provider';
 import { buildParticipantReport } from './build-participant-report';
 import { DiscordProvider } from './discord.provider';
-import { ExpoApplicantCountEvent } from './expo-applicant-count.schema';
 import { ExpoStatStore } from './expo-stat.store';
 
 const KST_DATE = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' });
@@ -15,16 +15,9 @@ export class AlarmReportService {
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly store: ExpoStatStore,
+    private readonly applicantCounts: ApplicantCountProvider,
     private readonly discord: DiscordProvider,
   ) {}
-
-  async recordApplicantCount(event: ExpoApplicantCountEvent): Promise<void> {
-    await this.store.upsert(
-      event.expoId,
-      event.expoTitle,
-      event.applicationPerson,
-    );
-  }
 
   async sendParticipantNumberReport(now: Date = new Date()): Promise<void> {
     const webhookUrl = this.config.discord.participantNumberUrl;
@@ -34,16 +27,28 @@ export class AlarmReportService {
       );
       return;
     }
-
-    const today = KST_DATE.format(now);
-    const stats = await this.store.findAll();
-    if (stats.length === 0) {
+    if (!this.applicantCounts.isConfigured()) {
+      this.logger.warn('expo/user 내부 API 미설정 — 등록 인원 리포트 생략');
       return;
     }
+
+    const today = KST_DATE.format(now);
     try {
+      const counts = await this.applicantCounts.findAll();
+      if (counts.length === 0) {
+        return;
+      }
+      const yesterday = await this.store.findYesterday(
+        counts.map((count) => count.expoId),
+      );
       await this.discord.sendEmbeds(
         webhookUrl,
-        stats.map((stat) => buildParticipantReport(stat, today)),
+        counts.map((count, index) =>
+          buildParticipantReport(
+            { ...count, yesterdayApplicationPerson: yesterday[index] },
+            today,
+          ),
+        ),
       );
     } catch (error) {
       this.logger.error(
@@ -54,8 +59,11 @@ export class AlarmReportService {
   }
 
   async saveYesterdayApplicantCount(): Promise<void> {
-    for (const stat of await this.store.findAll()) {
-      await this.store.saveYesterday(stat.expoId, stat.applicationPerson);
+    if (!this.applicantCounts.isConfigured()) {
+      return;
+    }
+    for (const count of await this.applicantCounts.findAll()) {
+      await this.store.saveYesterday(count.expoId, count.applicationPerson);
     }
   }
 }

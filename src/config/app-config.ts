@@ -63,7 +63,6 @@ const baseAppConfigSchema = z.object({
     brokers,
     clientId: z.string().min(1).default('expo-notification-server'),
     smsGroupId: z.string().min(1).default('expo-notification-server.sms'),
-    alarmGroupId: z.string().min(1).default('expo-notification-server.alarm'),
     topics: z
       .object({
         smsRequested: z.string().min(1).default('notification.sms.requested'),
@@ -76,10 +75,6 @@ const baseAppConfigSchema = z.object({
           .string()
           .min(1)
           .default('notification.sms.requested.dlq'),
-        expoApplicantCount: z
-          .string()
-          .min(1)
-          .default('expo.applicant-count.updated'),
       })
       .prefault({}),
   }),
@@ -105,6 +100,7 @@ const baseAppConfigSchema = z.object({
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
   }),
   user: serviceClient.optional(),
+  expo: serviceClient.optional(),
   promotion: z
     .object({
       enabled: z

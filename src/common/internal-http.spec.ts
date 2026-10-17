@@ -1,4 +1,4 @@
-import { InternalCallError, postInternal } from './internal-http';
+import { getInternal, InternalCallError, postInternal } from './internal-http';
 
 describe('postInternal', () => {
   const fetchSpy = jest.spyOn(globalThis, 'fetch');
@@ -20,6 +20,18 @@ describe('postInternal', () => {
         'X-Internal-Token': 'tok',
       },
       body: JSON.stringify({ a: 1 }),
+      signal: expect.any(AbortSignal) as AbortSignal,
+    });
+  });
+
+  it('GET은 바디 없이 내부 토큰 헤더만 보낸다', async () => {
+    fetchSpy.mockResolvedValue({ ok: true, status: 200 } as Response);
+
+    await getInternal('expo', 'http://expo/', '/internal/expo?page=0', 'tok');
+
+    expect(fetchSpy).toHaveBeenCalledWith('http://expo/internal/expo?page=0', {
+      method: 'GET',
+      headers: { 'X-Internal-Token': 'tok' },
       signal: expect.any(AbortSignal) as AbortSignal,
     });
   });

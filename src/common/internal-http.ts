@@ -10,15 +10,40 @@ export async function postInternal(
   body: unknown,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
+  return callInternal(service, baseUrl, path, timeoutMs, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Internal-Token': token,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getInternal(
+  service: string,
+  baseUrl: string,
+  path: string,
+  token: string,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  return callInternal(service, baseUrl, path, timeoutMs, {
+    method: 'GET',
+    headers: { 'X-Internal-Token': token },
+  });
+}
+
+async function callInternal(
+  service: string,
+  baseUrl: string,
+  path: string,
+  timeoutMs: number,
+  init: RequestInit,
+): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(`${baseUrl.replace(/\/+$/, '')}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Internal-Token': token,
-      },
-      body: JSON.stringify(body),
+      ...init,
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {

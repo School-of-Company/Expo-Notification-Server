@@ -9,13 +9,11 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       brokers: ['localhost:9092'],
       clientId: 'expo-notification-server',
       smsGroupId: 'expo-notification-server.sms',
-      alarmGroupId: 'expo-notification-server.alarm',
       topics: {
         smsRequested: 'notification.sms.requested',
         smsDeadLetter: 'notification.sms.requested.dlq',
         qrSmsSent: 'notification.qr-sms.sent',
         participantRegistered: 'user.participant.registered',
-        expoApplicantCount: 'expo.applicant-count.updated',
       },
     },
     redis: { host: 'localhost', port: 6379 },
@@ -40,6 +38,10 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     user: {
       baseUrl: 'http://user.test',
       internalToken: 'a'.repeat(32),
+    },
+    expo: {
+      baseUrl: 'http://expo.test',
+      internalToken: 'b'.repeat(32),
     },
     discord: { participantNumberUrl: 'https://discord.test/webhook' },
     ...overrides,
