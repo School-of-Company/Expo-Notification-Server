@@ -103,6 +103,7 @@ export class AdminGroupMessageStore {
       targetFingerprint: preview.targetFingerprint,
       channel: preview.channel,
       templateId: preview.templateId,
+      fallbackToSms: preview.fallbackToSms,
       status: 'QUEUED',
       createdAt: now.toISOString(),
       authorizedUntil: new Date(

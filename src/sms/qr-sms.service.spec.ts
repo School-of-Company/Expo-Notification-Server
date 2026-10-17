@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { ExpoNameProvider } from '../common/expo-name.provider';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
@@ -42,6 +43,7 @@ describe('QrSmsService', () => {
     [OutgoingSms[]]
   >();
   const publish = jest.fn<Promise<void>, [unknown]>();
+  const titleOf = jest.fn<Promise<string>, [string | undefined]>();
   // 이름 조회 응답만 흉내 낸다. Solapi 호출은 아래 globalFetch가 send 가짜로 돌린다 (실제 접속 없음).
   const fetchSpy = jest.fn<Promise<Response>, Parameters<typeof fetch>>();
   const globalFetch = jest
@@ -57,6 +59,8 @@ describe('QrSmsService', () => {
     redis = new FakeRedis();
     send.mockReset().mockResolvedValue({ failedMessageList: [] });
     publish.mockReset().mockResolvedValue(undefined);
+    titleOf.mockReset().mockResolvedValue('광주 박람회');
+    config.kakao = undefined;
     fetchSpy
       .mockReset()
       .mockResolvedValue(
@@ -68,6 +72,7 @@ describe('QrSmsService', () => {
         { provide: REDIS_CLIENT, useValue: redis },
         { provide: SOLAPI_CLIENT, useValue: { send } },
         { provide: QrSmsSentPublisher, useValue: { publish } },
+        { provide: ExpoNameProvider, useValue: { titleOf } },
         SmsEventDedupeStore,
         SmsEventGuard,
         ParticipantNamesProvider,
@@ -80,6 +85,60 @@ describe('QrSmsService', () => {
   });
   afterAll(() => globalFetch.mockRestore());
   const text = () => send.mock.calls[0]?.[0][0]?.text ?? '';
+
+  describe('알림톡(K2)', () => {
+    const expected =
+      '광주 박람회 등록이 완료되었습니다.\n입장할 때 아래 QR 링크를 입구에서 보여 주세요.\n\n' +
+      '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
+      'a'.repeat(22) +
+      '\n(문의) ☎062-380-4504';
+
+    it('templateId가 있으면 대체 발송을 켠 kakaoOptions와 템플릿 문구를 보낸다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: { qrRegistered: 'k2' } };
+
+      await service.handle(standard);
+
+      expect(send.mock.calls[0]?.[0][0]).toEqual({
+        to: standard.phoneNumber,
+        from: config.sms.fromStandardNumber,
+        text: expected,
+        kakaoOptions: {
+          pfId: 'pf-1',
+          templateId: 'k2',
+          disableSms: false,
+          variables: {
+            '#{행사명}': '광주 박람회',
+            '#{QR링크}':
+              '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
+              'a'.repeat(22),
+            '#{문의번호}': '062-380-4504',
+          },
+        },
+      });
+    });
+
+    it('templateId가 없으면 kakaoOptions 없이 같은 문구를 문자로 보낸다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: {} };
+
+      await service.handle(standard);
+
+      expect(send.mock.calls[0]?.[0][0]).toStrictEqual({
+        to: standard.phoneNumber,
+        from: config.sms.fromStandardNumber,
+        text: expected,
+      });
+    });
+
+    it('알림톡 1,000자를 넘으면 kakaoOptions 없이 문자로만 보낸다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: { qrRegistered: 'k2' } };
+      // 2,000바이트 안이면서 1,000자를 넘는 본문
+      titleOf.mockResolvedValue('A'.repeat(1_000));
+
+      await service.handle(standard);
+
+      expect(send.mock.calls[0]?.[0][0]).not.toHaveProperty('kakaoOptions');
+    });
+  });
 
   it('1명 링크를 대표자 번호로 한 통 보내고 개인정보 없는 완료 이벤트를 발행한다', async () => {
     await service.handle(standard);
@@ -95,6 +154,7 @@ describe('QrSmsService', () => {
         'a'.repeat(22),
     );
     expect(text()).not.toContain(standard.phoneNumber);
+    expect(titleOf).toHaveBeenCalledWith('expo-1');
     expect(publish).toHaveBeenCalledWith({
       eventId: 'e1',
       expoId: 'expo-1',
@@ -192,7 +252,7 @@ describe('QrSmsService', () => {
   });
 
   it('한 통의 LMS 상한을 넘으면 분할하거나 성공 처리하지 않는다', async () => {
-    config.sms.expoName = '가'.repeat(1000);
+    titleOf.mockResolvedValue('가'.repeat(1000));
     await expect(service.handle(standard)).rejects.toThrow('single LMS');
     expect(send).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();

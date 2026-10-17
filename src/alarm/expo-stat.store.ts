@@ -2,66 +2,29 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 
-export interface ExpoStat {
-  expoId: string;
-  title: string;
-  applicationPerson: number;
-  yesterdayApplicationPerson: number;
-}
-
-const EXPO_IDS_KEY = 'alarm:expos';
-const statKey = (expoId: string) => `alarm:expo:${expoId}`;
+// 다음 자정 스냅샷이 덮어쓰기 전에 사라지지 않을 만큼만 둔다. 끝난 박람회 키는 저절로 정리된다.
+const YESTERDAY_TTL_SECONDS = 2 * 24 * 60 * 60;
+const yesterdayKey = (expoId: string) => `alarm:yesterday:${expoId}`;
 
 @Injectable()
 export class ExpoStatStore {
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
 
-  async upsert(
-    expoId: string,
-    title: string,
-    applicationPerson: number,
-  ): Promise<void> {
-    const results = await this.redis
-      .multi()
-      .sadd(EXPO_IDS_KEY, expoId)
-      .hset(statKey(expoId), { title, applicationPerson })
-      .hsetnx(statKey(expoId), 'yesterdayApplicationPerson', 0)
-      .exec();
-    const failed = results?.find(([error]) => error);
-    if (!results || failed) {
-      throw failed?.[0] ?? new Error('redis transaction was discarded');
-    }
-  }
-
-  async findAll(): Promise<ExpoStat[]> {
-    const expoIds = await this.redis.smembers(EXPO_IDS_KEY);
-    const stats = await Promise.all(
-      expoIds.map(async (expoId) => {
-        const fields = await this.redis.hgetall(statKey(expoId));
-        if (!fields.title) {
-          return null;
-        }
-        return {
-          expoId,
-          title: fields.title,
-          applicationPerson: Number(fields.applicationPerson ?? 0),
-          yesterdayApplicationPerson: Number(
-            fields.yesterdayApplicationPerson ?? 0,
-          ),
-        };
-      }),
-    );
-    return stats.filter((stat): stat is ExpoStat => stat !== null);
+  async findYesterday(expoIds: readonly string[]): Promise<number[]> {
+    if (expoIds.length === 0) return [];
+    const values = await this.redis.mget(expoIds.map(yesterdayKey));
+    return values.map((value) => Number(value ?? 0));
   }
 
   async saveYesterday(
     expoId: string,
     applicationPerson: number,
   ): Promise<void> {
-    await this.redis.hset(
-      statKey(expoId),
-      'yesterdayApplicationPerson',
+    await this.redis.set(
+      yesterdayKey(expoId),
       applicationPerson,
+      'EX',
+      YESTERDAY_TTL_SECONDS,
     );
   }
 }

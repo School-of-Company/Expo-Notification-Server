@@ -1,5 +1,11 @@
 import { DiscordEmbed } from './discord.provider';
-import { ExpoStat } from './expo-stat.store';
+
+export interface ExpoStat {
+  expoId: string;
+  title: string;
+  applicationPerson: number;
+  yesterdayApplicationPerson: number;
+}
 
 const EMBED_COLOR_RED = 16711680;
 

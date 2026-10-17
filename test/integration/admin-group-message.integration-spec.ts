@@ -508,6 +508,54 @@ describe('admin group message HTTP/Redis contracts with fake provider', () => {
       .expect(422);
   });
 
+  it('accepts a 255-code-point supplementary-plane location in a preview and rejects 256', async () => {
+    if (!runtime.app) throw new Error('runtime not started');
+    const server = runtime.app.getHttpServer();
+    const body = previewBody();
+    const preview = await request(server)
+      .post('/internal/admin-group-messages/previews')
+      .set('X-Internal-Token', token)
+      .send({
+        ...body,
+        targets: [
+          {
+            ...body.targets[0],
+            templateVariables: { location: '😀'.repeat(255) },
+          },
+        ],
+      })
+      .expect(201);
+    const accepted = responseBody<PreviewResponse>(preview);
+    await request(server)
+      .post(
+        `/internal/admin-group-messages/previews/${accepted.previewId}/jobs`,
+      )
+      .set('X-Internal-Token', token)
+      .send({
+        requesterUserId: body.requesterUserId,
+        expoId: body.expoId,
+        targetFingerprint: body.targetFingerprint,
+        idempotencyKey: randomUUID(),
+      })
+      .expect(202);
+    await runtime.dispatch();
+    expect(runtime.sender.sends).toHaveLength(1);
+    await request(server)
+      .post('/internal/admin-group-messages/previews')
+      .set('X-Internal-Token', token)
+      .send({
+        ...body,
+        requestId: randomUUID(),
+        targets: [
+          {
+            ...body.targets[0],
+            templateVariables: { location: '😀'.repeat(256) },
+          },
+        ],
+      })
+      .expect(400);
+  });
+
   it('removes expired job IDs from the durable due queue', async () => {
     const staleJobId = 'f'.repeat(64);
     await runtime.redis.zadd(

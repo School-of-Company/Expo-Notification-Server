@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { createAppConfig } from '../fixtures/app-config.fixture';
+import { ExpoNameProvider } from '../../src/common/expo-name.provider';
 import { SmsAuthService } from '../../src/sms/sms-auth.service';
 import { SmsAuthStore } from '../../src/sms/sms-auth.store';
 import { SmsSenderProvider } from '../../src/sms/sms-sender.provider';
@@ -50,7 +51,9 @@ describe('SMS 인증 창 만료 경합 (실제 Redis)', () => {
     store = new SmsAuthStore(redis);
     const sender = {
       send: jest.fn((messages: Array<{ text: string }>) => {
-        sent.push(...messages.map((m) => m.text));
+        sent.push(
+          ...messages.map((m) => /\[(\d{4})\]/.exec(m.text)?.[1] ?? m.text),
+        );
         return Promise.resolve({ total: messages.length, failedTo: [] });
       }),
     };
@@ -58,6 +61,9 @@ describe('SMS 인증 창 만료 경합 (실제 Redis)', () => {
       config,
       store,
       sender as unknown as SmsSenderProvider,
+      {
+        titleOf: () => Promise.resolve(config.sms.expoName),
+      } as unknown as ExpoNameProvider,
     );
   });
   afterEach(() => jest.restoreAllMocks());

@@ -87,7 +87,7 @@ export class GroupMessageSolapiProvider implements GroupMessageSender {
                 ],
               ),
             ),
-            disableSms: true,
+            disableSms: !job.fallbackToSms,
           }
         : undefined;
     if (job.channel === 'KAKAO' && !kakaoOptions) return { kind: 'unknown' };

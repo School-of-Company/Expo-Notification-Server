@@ -7,6 +7,8 @@ const env = {
   SMS_API_SECRET: 'synthetic-secret',
   SMS_FROM_STANDARD_NUMBER: '01000000000',
   SMS_FROM_TRAINEE_NUMBER: '01000000001',
+  SMS_CONTACT_STANDARD_NUMBER: '0620000000',
+  SMS_CONTACT_TRAINEE_NUMBER: '0620000001',
 };
 
 describe('Swagger configuration', () => {

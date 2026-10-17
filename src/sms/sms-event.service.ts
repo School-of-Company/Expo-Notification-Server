@@ -6,6 +6,7 @@ import {
   SmsDeliveryRejectedError,
   SmsDeliveryUnknownError,
 } from './sms-errors';
+import { kakaoOptionsFor } from './kakao-message';
 import { SmsEvent } from './sms-event.schema';
 import { SmsEventGuard } from './sms-event.guard';
 import { renderSms } from './sms-message.templates';
@@ -23,7 +24,15 @@ export class SmsEventService {
 
   async handle(event: SmsEvent): Promise<void> {
     await this.guard.once(event.eventId, async (beginSend) => {
-      const { to, senderType, text } = renderSms(event);
+      const { to, senderType, text, variables } = renderSms(event);
+      // CUSTOM은 승인 템플릿이 없는 자유 문구라 문자로만 보낸다.
+      const kakaoOptions =
+        variables &&
+        kakaoOptionsFor(
+          this.config,
+          this.config.kakao?.auto.drawResult,
+          variables,
+        );
       const from =
         senderType === 'TRAINEE'
           ? this.config.sms.fromTraineeNumber
@@ -32,7 +41,12 @@ export class SmsEventService {
       await beginSend();
       const receipt = await this.sender.deliver(
         event.eventId,
-        to.map((recipient) => ({ to: recipient, from, text })),
+        to.map((recipient) => ({
+          to: recipient,
+          from,
+          text,
+          ...(kakaoOptions && { kakaoOptions }),
+        })),
       );
 
       if (receipt.kind === 'rejected') {

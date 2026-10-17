@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { deepMerge } from './deep-merge';
 import { AppConfig, appConfigSchema } from './app-config';
 
@@ -56,13 +57,11 @@ function configFromEnv(env: Env): Record<string, unknown> {
       brokers: env.KAFKA_BROKERS,
       clientId: env.KAFKA_CLIENT_ID,
       smsGroupId: env.KAFKA_SMS_GROUP_ID,
-      alarmGroupId: env.KAFKA_ALARM_GROUP_ID,
       topics: pickDefined({
         smsRequested: env.KAFKA_SMS_REQUESTED_TOPIC,
         smsDeadLetter: env.KAFKA_SMS_DEAD_LETTER_TOPIC,
         qrSmsSent: env.KAFKA_QR_SMS_SENT_TOPIC,
         participantRegistered: env.KAFKA_PARTICIPANT_REGISTERED_TOPIC,
-        expoApplicantCount: env.KAFKA_EXPO_APPLICANT_COUNT_TOPIC,
       }),
     }),
     redis: pickDefined({
@@ -92,6 +91,12 @@ function configFromEnv(env: Env): Record<string, unknown> {
         internalToken: env.USER_SERVICE_INTERNAL_TOKEN,
       }),
     }),
+    ...((env.EXPO_SERVICE_URL || env.EXPO_SERVICE_INTERNAL_TOKEN) && {
+      expo: pickDefined({
+        baseUrl: env.EXPO_SERVICE_URL,
+        internalToken: env.EXPO_SERVICE_INTERNAL_TOKEN,
+      }),
+    }),
     ...eurekaFromEnv(env),
     ...((env.PROMOTION_APPLICATION_URL || env.PROMOTION_ENABLED) && {
       promotion: {
@@ -104,6 +109,21 @@ function configFromEnv(env: Env): Record<string, unknown> {
         application: pickDefined({
           baseUrl: env.PROMOTION_APPLICATION_URL,
           internalToken: env.PROMOTION_APPLICATION_INTERNAL_TOKEN,
+        }),
+      },
+    }),
+    ...((env.PROMOTION_OFFER_APPLICATION_URL ||
+      env.PROMOTION_OFFER_ENABLED) && {
+      promotionOffer: {
+        ...pickDefined({
+          enabled: env.PROMOTION_OFFER_ENABLED,
+          internalToken: env.PROMOTION_OFFER_INTERNAL_TOKEN,
+          topic: env.KAFKA_PROMOTION_OFFER_TOPIC,
+          groupId: env.KAFKA_PROMOTION_OFFER_GROUP_ID,
+        }),
+        application: pickDefined({
+          baseUrl: env.PROMOTION_OFFER_APPLICATION_URL,
+          internalToken: env.PROMOTION_OFFER_APPLICATION_INTERNAL_TOKEN,
         }),
       },
     }),
@@ -122,6 +142,24 @@ function configFromEnv(env: Env): Record<string, unknown> {
       participantNumberUrl: env.DISCORD_PARTICIPANT_NUMBER_URL,
     }),
   };
+}
+
+// 운영 서버는 .env만 읽어서 알림톡 설정(templateId 목록)은 JSON 파일로 받는다.
+function kakaoFromFile(env: Env): Record<string, unknown> {
+  const path = env.KAKAO_CONFIG_FILE;
+  if (!path) {
+    return {};
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new Error(`invalid KAKAO_CONFIG_FILE (${path})`);
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new Error(`invalid KAKAO_CONFIG_FILE (${path})`);
+  }
+  return body as Record<string, unknown>;
 }
 
 // config-server Basic 인증(Expo-Config-Server#54). 사용자 이름은 조회하는 서비스 식별자다.
@@ -178,7 +216,7 @@ export async function loadConfig(
 ): Promise<AppConfig> {
   const remote = await fetchRemoteConfig(env, fetchImpl);
   const result = appConfigSchema.safeParse(
-    deepMerge(configFromEnv(env), remote),
+    deepMerge(deepMerge(configFromEnv(env), kakaoFromFile(env)), remote),
   );
   if (!result.success) {
     const issues = result.error.issues

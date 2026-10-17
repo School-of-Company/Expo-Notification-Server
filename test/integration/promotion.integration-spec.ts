@@ -49,7 +49,11 @@ describe('promotion HTTP/Kafka/Redis contracts with synthetic SMS', () => {
     );
     expect(runtime.http.sms[0]?.text).toContain('미래 수업');
     expect(runtime.http.sms[0]?.text).toContain('10:00');
-    expect(runtime.http.sms[0]?.text).not.toMatch(/장소:|신청 조회:|확정 버튼/);
+    expect(runtime.http.sms[0]?.text).toContain('장소: 추후 안내');
+    expect(runtime.http.sms[0]?.text).toContain(
+      '신청 조회: 신청시스템에서 확인해 주세요',
+    );
+    expect(runtime.http.sms[0]?.text).not.toMatch(/확정 버튼/);
     expect((await runtime.store.get(first.eventId))?.status).toBe('ACCEPTED');
     expect(
       await runtime.redis.ttl(
@@ -91,6 +95,32 @@ describe('promotion HTTP/Kafka/Redis contracts with synthetic SMS', () => {
     expect(runtime.http.sms[1]?.text).toContain(
       '신청 조회: https://expo.test/my-applications',
     );
+  });
+
+  it('accepts a 255-code-point supplementary-plane location from promotion check and rejects 256', async () => {
+    runtime.http.checkResponse = (event) => ({
+      ...eligible(event),
+      location: '😀'.repeat(255),
+    });
+    await runtime.start();
+    const accepted = promoted();
+    await runtime.publish(accepted);
+    await runtime.committed(1);
+    expect(runtime.http.sms).toHaveLength(1);
+    expect(runtime.http.sms[0]?.text).toContain(`장소: ${'😀'.repeat(255)}`);
+
+    runtime.http.checkResponse = (event) => ({
+      ...eligible(event),
+      location: '😀'.repeat(256),
+    });
+    const rejected = promoted();
+    await runtime.publish(rejected);
+    await runtime.committed(2);
+    expect(runtime.http.sms).toHaveLength(1);
+    expect(await runtime.store.get(rejected.eventId)).toMatchObject({
+      status: 'PENDING',
+      reason: 'LOOKUP_UNAVAILABLE',
+    });
   });
 
   it('stores missing representative phone for operations and does not automatically retry', async () => {

@@ -2,7 +2,7 @@
 
 ## Kafka 이벤트
 
-공통: JSON, UTF-8. `eventId`(멱등키)는 필수. `version: 1`은 `notification.sms.requested`와 `expo.applicant-count.updated`에 필수이며, `user.participant.registered`에는 요구하지 않는다. 스키마가 틀린 메시지는 값 없이 검증 사유만 로그에 남기고 건너뛴다.
+공통: JSON, UTF-8. `eventId`(멱등키)는 필수. `version: 1`은 `notification.sms.requested`에 필수이며, `user.participant.registered`에는 요구하지 않는다. 스키마가 틀린 메시지는 값 없이 검증 사유만 로그에 남기고 건너뛴다.
 
 ### `user.participant.registered` — 등록 완료 (User 발행, QR 문자)
 
@@ -63,7 +63,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 
 | type | 필드 | 설명 |
 |---|---|---|
-| `DRAW_RESULT` | `phoneNumber`, `drawNumber` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정) |
+| `DRAW_RESULT` | `phoneNumber`, `drawNumber`, 선택 `expoId` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정). `expoId`는 받기만 하고 아직 쓰지 않는다(K4 문구에 행사명이 없음) |
 | `CUSTOM` | `phoneNumbers[1..1000]`, `senderType`, `text` | 본문을 호출 측이 만든 일반/대량 문자 (연수 일정 안내 포함) |
 
 완료 시점부터 7일 동안 `done-v2` 마커가 남아 있으면 같은 `eventId`의 문자 재발송을 억제한다. 발송 결과는 세 가지로 나눈다(아래 **접수 결과 불명(UNKNOWN)** 참고).
@@ -147,15 +147,17 @@ processing(선점 5분) 이벤트는 건너뛰거나 DLQ로 보내지 않고 기
 
 배포 제약: 구버전 인스턴스는 `sending`/`unknown` 값을 처리 중으로 보고 재전달 대기를 반복한다(발송하지 않음). 혼합 버전 구간에서는 해당 파티션이 대기할 수 있으므로 같은 consumer group의 구버전을 모두 교체한다. 롤백할 때도 남아 있는 `sending`/`unknown` 키는 같은 이유로 해당 파티션을 막는다. 이 경우 위 복구 절차로 키를 먼저 정리한다. 발송 전 단계(이름 조회 등)는 선점 5분 안에 끝나야 한다. 이 시간을 넘기면 다른 인스턴스가 같은 이벤트를 선점할 수 있다(소유자 토큰은 두지 않았다).
 
-### `expo.applicant-count.updated` — 박람회 등록 인원 변경
+## 박람회 등록 인원 리포트 (내부 API 조회, #54)
 
-```json
-{ "eventId": "…", "version": 1, "expoId": "…", "expoTitle": "…", "applicationPerson": 120 }
-```
+`expo.applicant-count.updated` 이벤트는 발행하는 서비스가 없어 리포트가 나가지 않았다. 그래서 이벤트를 받지 않고 크론이 직접 조회하도록 바꿨다. 컨슈머와 `kafka.alarmGroupId`·`kafka.topics.expoApplicantCount` 설정은 제거했다. config-server에 남은 두 키는 무시된다.
 
-`applicationPerson`은 증감분이 아니라 **현재 총 인원(절대값)** 이다. 알림 서버가 박람회별로 보관하고,
-매 정각(KST)에 Discord 웹훅으로 리포트, 매일 00:00:30(KST)에 "어제 인원"으로 스냅샷한다.
-크론은 Redis 락(`alarm:lock:*`, 55초)으로 인스턴스가 여러 개여도 한 번만 실행된다.
+1. Expo `GET /internal/expo?page=&size=100`(Expo-Expo-Server#134): 삭제 중이 아니고 종료일이 오늘(KST) 이후인 박람회의 `expoId`·`title`을 `hasNext=false`까지 읽는다. 최대 10페이지(1,000개)이고 넘으면 그 회차를 실패로 본다.
+2. User `GET /internal/expos/{expoId}/participant-stats`: 박람회마다 `registeredParticipantCount`(등록한 고유 참가자 수, 동행자 포함)를 리포트의 "등록 인원"으로 쓴다.
+
+- 매 정각(KST)에 위 값으로 Discord 웹훅 리포트를 보낸다. "어제 인원"은 매일 00:00:30(KST)에 같은 조회로 얻은 인원을 `alarm:yesterday:{expoId}`에 저장한 값이다(TTL 2일). 스냅샷이 없으면 0으로 본다.
+- 조회나 발송이 실패하면 오류를 로그에 남기고 그 회차를 건너뛴다. 일부 박람회만 담은 리포트는 보내지 않는다. 자정 스냅샷이 실패하면 다음 날 리포트의 어제 인원이 이전 스냅샷 값이거나 0이 된다.
+- `expo`나 `user` 연결 설정, `discord.participantNumberUrl` 중 하나라도 없으면 리포트와 스냅샷을 생략한다.
+- 크론은 Redis 락(`alarm:lock:*`, 55초)으로 인스턴스가 여러 개여도 한 번만 실행된다.
 
 ## HTTP
 
@@ -189,13 +191,11 @@ kafka:
   brokers: ["<KAFKA_HOST>:9092"]      # 문자열 "a:9092,b:9092"도 허용
   clientId: expo-notification-server
   smsGroupId: expo-notification-server.sms
-  alarmGroupId: expo-notification-server.alarm
   topics:
     smsRequested: notification.sms.requested
     qrSmsSent: notification.qr-sms.sent
     participantRegistered: user.participant.registered
     smsDeadLetter: notification.sms.requested.dlq
-    expoApplicantCount: expo.applicant-count.updated
 redis:
   host: "<REDIS_HOST>"
   port: 6379
@@ -207,18 +207,35 @@ sms:                                   # 비밀 값은 Vault
   authMaxSendCountPerHour: 300
   eventMaxAttempts: 5
   authMaxVerifyAttemptCount: 5
+  contactStandardNumber: "…"           # 필수, QR 문자의 (문의) 줄
+  contactTraineeNumber: "…"            # 필수
   qrUrlTemplate: ""                     # 비어 있으면 일반 QR 문자 미발송
   traineeQrUrlTemplate: ""              # 비어 있으면 연수 QR 문자 미발송
-user:                                  # 이름 조회 전용, 통째로 생략하면 역할 라벨
+user:                                  # 이름 조회·등록 인원 리포트, 통째로 생략하면 역할 라벨이고 리포트 생략
   baseUrl: "http://<USER_HOST>:8080"
   internalToken: "…"                    # Vault, 32자 이상
+expo:                                  # 등록 인원 리포트의 박람회 목록과 문자 #{행사명}, 생략하면 리포트 생략·기본 행사명
+  baseUrl: "http://<EXPO_HOST>:8080"
+  internalToken: "…"                    # Vault, 32자 이상, Expo의 EXPO_INTERNAL_TOKEN과 같은 값
 ```
 
 | 위치 | 키 |
 |---|---|
-| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회 전용) |
+| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회·등록 인원 조회), `expo.internalToken` (32자 이상, Expo의 내부 토큰 사본, 박람회 목록 조회) |
 
-env 이름 조회 키는 `USER_SERVICE_URL`, `USER_SERVICE_INTERNAL_TOKEN`이다. 둘 다 없으면 fallback하고 일부만 설정되었거나 토큰/URL이 잘못되면 부팅을 실패시킨다. Attention HTTP 설정은 제거했다. User 이름 API만 사용하며 제거된 `sms-try` HTTP 호출은 복구하지 않는다.
+env 이름 조회 키는 `USER_SERVICE_URL`, `USER_SERVICE_INTERNAL_TOKEN`이다. 둘 다 없으면 fallback하고 일부만 설정되었거나 토큰/URL이 잘못되면 부팅을 실패시킨다. Expo 연결 env 키는 `EXPO_SERVICE_URL`, `EXPO_SERVICE_INTERNAL_TOKEN`이며 규칙은 같다. Attention HTTP 설정은 제거했다. User 이름 API만 사용하며 제거된 `sms-try` HTTP 호출은 복구하지 않는다.
+
+### 카카오 알림톡 (`KAKAO_CONFIG_FILE`)
+
+env `KAKAO_CONFIG_FILE`에 JSON 파일 경로를 주면 env 설정 위에 합친다(config 서버 값이 더 우선). 파일을 읽지 못하거나
+JSON 객체가 아니면 경로만 담은 에러로 부팅을 실패시킨다. 모양은 [알림톡 계획 4장](kakao-alimtalk-plan.md)을 따른다.
+
+- `kakao.pfId`, `kakao.auto.{authCode,qrRegistered,promotion,drawResult}`: 자동 메시지 K1~K4의 templateId. 모두 선택이고,
+  templateId가 하나라도 있으면 `pfId`가 필요하다. 키가 있으면 카톡을 먼저 보내고 실패하면 같은 본문을 문자로 보낸다
+  (`disableSms: false`). 키가 없으면 문자로만 보낸다. 문구는 `src/sms/sms-message.templates.ts` 상수에 있다.
+- 본문이 알림톡 한도(1,000자)를 넘는 QR·승급 메시지는 카톡 없이 문자로만 보낸다.
+- `#{행사명}`은 이벤트(또는 `POST /sms`의 선택 `expoId`)의 박람회 제목이다. Expo `GET /internal/expo` 목록을 10분 캐시해서
+  찾고, `expoId`가 없거나 목록에 없거나 조회가 실패하면 `sms.expoName`을 쓴다. 제목을 못 찾아도 발송은 막지 않는다.
 
 config-server 쪽에서 해야 할 일: `configs/notification-{local,dev,prod}.yml` 추가, `docs/service-configs.md` 표와
 `src/config/configs-files.spec.ts`의 `SERVICES`에 `notification` 추가.
@@ -230,6 +247,10 @@ TRAINEE CUSTOM의 실제 Kafka/Redis 통합 테스트, 7일 완료 마커, DLQ �
 [Notification #20 계약](notification-20-contract.md)에 수신 JSON, 필요한 Application 검증 API,
 Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행기/API는 아직 연결되지 않았으며
 `promotion.enabled`는 기본 비활성이다. 기존 CUSTOM 이벤트로 승급 안내를 대체하지 않는다.
+
+대기 참여 제안(Application #144)은 승급 완료 안내와 다른 topic `application.promotion-offer.requested`·상태·결과 보고를 쓴다.
+[Notification #52 계약](notification-52-promotion-offer.md)에 흐름, 실제 공급자 접수 시각 보고, 결과 불명 처리와 설정을 기록했다.
+`promotionOffer.enabled`는 기본 비활성이다.
 
 관리자 그룹 발송의 내부 HTTP payload, 상태 전이, 중복/timeout 처리와 Kakao 승인 template 설정은
 [Notification #10 계약](notification-10-admin-group-messaging.md)에 기록한다. 기능은
