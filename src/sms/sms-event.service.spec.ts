@@ -57,6 +57,57 @@ describe('SmsEventService', () => {
       new SmsEventGuard(dedupe as unknown as SmsEventDedupeStore),
       sender as unknown as SmsSenderProvider,
     );
+    config.kakao = undefined;
+  });
+
+  describe('알림톡(K4)', () => {
+    const text =
+      '축 당첨! 설문조사 행운의 숫자에 당첨되셨습니다. 선물은 입구 운영본부에서 받아가세요!\n3번!';
+
+    it('DRAW_RESULT templateId가 있으면 대체 발송을 켠 kakaoOptions를 붙인다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: { drawResult: 'k4' } };
+
+      await service.handle({ ...drawResult, expoId: 'expo-1' });
+
+      expect(sender.deliver).toHaveBeenCalledWith('e1', [
+        {
+          to: '01012345678',
+          from: config.sms.fromStandardNumber,
+          text,
+          kakaoOptions: {
+            pfId: 'pf-1',
+            templateId: 'k4',
+            variables: { '#{번호}': '3' },
+            disableSms: false,
+          },
+        },
+      ]);
+    });
+
+    it('templateId가 없으면 kakaoOptions 없이 같은 문구를 문자로 보낸다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: { authCode: 'k1' } };
+
+      await service.handle(drawResult);
+
+      expect(
+        (sender.deliver.mock.calls[0] as [string, unknown])[1],
+      ).toStrictEqual([
+        { to: '01012345678', from: config.sms.fromStandardNumber, text },
+      ]);
+    });
+
+    it('CUSTOM은 templateId 설정과 무관하게 문자로만 보낸다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: { drawResult: 'k4' } };
+
+      await service.handle(custom);
+
+      expect(
+        (sender.deliver.mock.calls[0] as [string, unknown])[1],
+      ).toStrictEqual([
+        { to: '01011112222', from: config.sms.fromTraineeNumber, text: '공지' },
+        { to: '01033334444', from: config.sms.fromTraineeNumber, text: '공지' },
+      ]);
+    });
   });
 
   it('이벤트를 문자로 렌더링해 일반 참가자 발신번호로 발송한다', async () => {

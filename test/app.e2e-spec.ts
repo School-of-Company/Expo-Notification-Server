@@ -56,7 +56,8 @@ describe('Notification server (e2e)', () => {
 
   type SentSms = { to: string; from: string; text: string };
   const sentBatches = () => solapiSend.mock.calls as [SentSms[]][];
-  const lastSentCode = () => sentBatches().at(-1)![0][0].text;
+  const lastSentCode = () =>
+    /인증번호 \[(\d{4})\]/.exec(sentBatches().at(-1)![0][0].text)![1];
   const embedFields = (call: unknown[]) =>
     (
       JSON.parse((call[1] as RequestInit).body as string) as {
@@ -228,9 +229,32 @@ describe('Notification server (e2e)', () => {
       expect(solapiSend).toHaveBeenCalledTimes(config.sms.authMaxSendCount);
     });
 
+    it('expoId를 보내면 그 박람회 제목을 K1 문구의 행사명으로 쓰고, 없으면 기본 행사명을 쓴다', async () => {
+      await request(app.getHttpServer())
+        .post('/sms')
+        .send({ phoneNumber: '01012345678', expoId: 'expo-1' })
+        .expect(200);
+      await request(app.getHttpServer())
+        .post('/sms')
+        .send({ phoneNumber: '01087654321' })
+        .expect(200);
+
+      expect(sentBatches()[0][0][0].text).toMatch(
+        /^\[광주 박람회\] 인증번호 \[\d{4}\]를 3분 안에 입력해 주세요\.$/,
+      );
+      expect(sentBatches()[1][0][0].text).toMatch(
+        new RegExp(`^\\[${config.sms.expoName}\\] 인증번호 `),
+      );
+    });
+
     it.each([
       ['전화번호 형식 오류', 'post', { phoneNumber: 'abc' }],
       ['전화번호 누락', 'post', {}],
+      [
+        'expoId 형식 오류',
+        'post',
+        { phoneNumber: '01012345678', expoId: '../x' },
+      ],
     ])('%s는 400이고 문자를 보내지 않는다', async (_name, _method, body) => {
       await request(app.getHttpServer()).post('/sms').send(body).expect(400);
 

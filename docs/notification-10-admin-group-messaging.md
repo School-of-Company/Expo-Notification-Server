@@ -41,7 +41,7 @@ participant별 target과 렌더링 문구를 유지하며 같은 번호라는 �
 
 미리보기 target은 최대 5,000건이다. 발송 가능한 target에는 `targetId`, `applicationId`, optional
 `participantId`, `programType`, `recipientPhone`, `content`가 필요하다. Kakao만 optional
-`templateVariables`를 받는다. 현재 의미 이름은 `name`, `programName`, `sessionName`, `location`이다.
+`templateVariables`를 받는다. 현재 의미 이름은 `expoName`, `name`, `programName`, `sessionName`, `location`, `status`이다.
 이 이름은 Application/Client와 승인 template을 연결하는 최소 계약이며 최종 문구나 필수 변수 정책을
 임의로 고정하지 않는다.
 
@@ -65,7 +65,8 @@ target의 권한 시간이 만료되거나 channel 설정이 사라지면 job은
 
 ## Kakao와 공급자 설정
 
-SMS fallback은 항상 false이며 Kakao 자동 SMS 대체는 사용하지 않는다. `adminGroupMessaging.kakao`가
+`fallbackToSms`는 boolean이다. KAKAO에서 true면 카톡을 못 받는 번호에 같은 본문을 문자로 보낸다(`disableSms: false`).
+SMS 채널에서 true는 400이다. job은 `fallbackToSms`를 저장하며, 이 필드가 없는 예전 job은 대체 발송 없이 보낸다. `adminGroupMessaging.kakao`가
 없거나 disabled이면 config가 `KAKAO.enabled=false`, `templates=[]`를 반환하고 Kakao preview는 422다.
 template 설정은 Solapi `pfId`, 승인 template ID/content, 의미 이름에서 실제 승인 변수 이름
 (`#{승인변수명}`)으로 가는 명시적 mapping을 포함한다. preview의 렌더링 문구가 설정된 승인 content를

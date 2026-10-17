@@ -63,7 +63,7 @@ describe('buildQrPageLinks', () => {
         id: Number.MAX_SAFE_INTEGER,
         participants,
       });
-      const text = renderQrSms({
+      const { text } = renderQrSms({
         expoName: '광주 박람회',
         contactNumber: '062-380-4504',
         links: links.map(({ url }, i) => ({

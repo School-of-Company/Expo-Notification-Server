@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { ExpoNameProvider } from '../common/expo-name.provider';
+import { kakaoOptionsFor } from './kakao-message';
 import { ParticipantNamesProvider } from './participant-names.provider';
 import { buildQrPageLinks } from './qr-page-links';
 import { ParticipantRegisteredEvent } from './participant-event.schema';
@@ -27,6 +29,7 @@ export class QrSmsService {
     private readonly names: ParticipantNamesProvider,
     private readonly sender: SmsSenderProvider,
     private readonly sentPublisher: QrSmsSentPublisher,
+    private readonly expoNames: ExpoNameProvider,
   ) {}
 
   async handle(event: ParticipantRegisteredEvent): Promise<void> {
@@ -50,8 +53,8 @@ export class QrSmsService {
           })
         : new Map<number, string>();
       let companionNumber = 0;
-      const text = renderQrSms({
-        expoName: this.config.sms.expoName,
+      const { text, variables } = renderQrSms({
+        expoName: await this.expoNames.titleOf(event.expoId),
         links: links.map(({ id, url }) => {
           const representative = id === (event.representativeId ?? event.id);
           const name = names.get(id);
@@ -73,6 +76,15 @@ export class QrSmsService {
       if (Buffer.byteLength(text, 'utf8') > 2_000) {
         throw new QrLinkError('QR SMS exceeds single LMS byte limit');
       }
+      // 알림톡 본문은 1,000자까지다. 동행자가 많아 넘으면 카톡 없이 문자로만 보낸다.
+      const kakaoOptions =
+        Array.from(text).length <= 1_000
+          ? kakaoOptionsFor(
+              this.config,
+              this.config.kakao?.auto.qrRegistered,
+              variables,
+            )
+          : undefined;
       await beginSend();
       const receipt = await this.sender.deliver(event.eventId, [
         {
@@ -81,6 +93,7 @@ export class QrSmsService {
             ? this.config.sms.fromStandardNumber
             : this.config.sms.fromTraineeNumber,
           text,
+          ...(kakaoOptions && { kakaoOptions }),
         },
       ]);
       if (receipt.kind === 'rejected') {

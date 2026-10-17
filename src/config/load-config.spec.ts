@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfig } from './load-config';
 
 const baseEnv = {
@@ -7,6 +10,8 @@ const baseEnv = {
   SMS_API_SECRET: 'env-secret',
   SMS_FROM_STANDARD_NUMBER: '0623804504',
   SMS_FROM_TRAINEE_NUMBER: '0623804587',
+  SMS_CONTACT_STANDARD_NUMBER: '062-380-4504',
+  SMS_CONTACT_TRAINEE_NUMBER: '062-380-4587',
   USER_SERVICE_URL: 'http://user:8080',
   USER_SERVICE_INTERNAL_TOKEN: 'a'.repeat(32),
 };
@@ -75,19 +80,105 @@ describe('loadConfig', () => {
     await expect(promise).rejects.not.toThrow(/short-secret/);
   });
 
-  it('SMS 관련 선택 설정(행사명, 문의 번호)을 읽는다', async () => {
+  it('SMS 설정(행사명, 문의 번호)을 읽는다', async () => {
     const config = await loadConfig(
-      {
-        ...baseEnv,
-        SMS_EXPO_NAME: '광주 박람회',
-        SMS_CONTACT_STANDARD_NUMBER: '062-380-4504',
-      },
+      { ...baseEnv, SMS_EXPO_NAME: '광주 박람회' },
       jest.fn(),
     );
 
     expect(config.sms.expoName).toBe('광주 박람회');
     expect(config.sms.contactStandardNumber).toBe('062-380-4504');
-    expect(config.sms.contactTraineeNumber).toBeUndefined();
+    expect(config.sms.contactTraineeNumber).toBe('062-380-4587');
+  });
+
+  it('문의 번호가 없으면 부팅을 실패시킨다', async () => {
+    await expect(
+      loadConfig({ ...baseEnv, SMS_CONTACT_TRAINEE_NUMBER: '' }, jest.fn()),
+    ).rejects.toThrow(/sms\.contactTraineeNumber/);
+  });
+
+  describe('KAKAO_CONFIG_FILE', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'kakao-config-'));
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    const write = (content: string) => {
+      const path = join(dir, 'kakao.json');
+      writeFileSync(path, content);
+      return path;
+    };
+
+    it('파일의 kakao 설정을 env 설정에 합친다', async () => {
+      const path = write(
+        JSON.stringify({
+          kakao: { pfId: 'pf', auto: { authCode: 'k1' } },
+          sms: { expoName: '파일 행사' },
+        }),
+      );
+
+      const config = await loadConfig(
+        { ...baseEnv, KAKAO_CONFIG_FILE: path },
+        jest.fn(),
+      );
+
+      expect(config.kakao).toEqual({ pfId: 'pf', auto: { authCode: 'k1' } });
+      expect(config.sms.expoName).toBe('파일 행사');
+      expect(config.sms.apiKey).toBe('env-key');
+    });
+
+    it('config 서버 값이 파일 값보다 우선한다', async () => {
+      const path = write(JSON.stringify({ kakao: { pfId: 'file-pf' } }));
+
+      const config = await loadConfig(
+        {
+          ...baseEnv,
+          KAKAO_CONFIG_FILE: path,
+          CONFIG_SERVER_URL: 'http://config',
+        },
+        jest
+          .fn()
+          .mockResolvedValue(jsonResponse({ kakao: { pfId: 'remote' } })),
+      );
+
+      expect(config.kakao?.pfId).toBe('remote');
+    });
+
+    it.each([
+      ['깨진 JSON', '{"kakao":'],
+      ['객체가 아닌 JSON', '[]'],
+    ])('%s이면 경로만 담은 에러로 부팅을 실패시킨다', async (_, content) => {
+      const path = write(content);
+
+      const promise = loadConfig(
+        { ...baseEnv, KAKAO_CONFIG_FILE: path },
+        jest.fn(),
+      );
+
+      await expect(promise).rejects.toThrow(
+        `invalid KAKAO_CONFIG_FILE (${path})`,
+      );
+      await expect(promise).rejects.not.toThrow(/kakao"|JSON|Unexpected/);
+    });
+
+    it('파일을 읽지 못하면 부팅을 실패시킨다', async () => {
+      const path = join(dir, 'missing.json');
+
+      await expect(
+        loadConfig({ ...baseEnv, KAKAO_CONFIG_FILE: path }, jest.fn()),
+      ).rejects.toThrow(`invalid KAKAO_CONFIG_FILE (${path})`);
+    });
+
+    it('templateId가 있는데 pfId가 없으면 부팅을 실패시킨다', async () => {
+      const path = write(
+        JSON.stringify({ kakao: { auto: { promotion: 'k3' } } }),
+      );
+
+      await expect(
+        loadConfig({ ...baseEnv, KAKAO_CONFIG_FILE: path }, jest.fn()),
+      ).rejects.toThrow(/kakao\.pfId/);
+    });
   });
 
   it('config 서버 값이 env 값보다 우선하고 형제 키는 유지된다', async () => {

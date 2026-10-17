@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
+import { ExpoNameProvider } from '../common/expo-name.provider';
+import { kakaoOptionsFor } from '../sms/kakao-message';
 import { PromotionApplicationProvider } from './promotion-application.provider';
 import { promotionMessage } from './promotion-message';
 import { PromotionSolapiProvider } from './promotion-solapi.provider';
@@ -19,6 +21,7 @@ export class PromotionService {
     private readonly store: PromotionStore,
     private readonly application: PromotionApplicationProvider,
     private readonly sender: PromotionSolapiProvider,
+    private readonly expoNames: ExpoNameProvider,
   ) {}
 
   async handle(event: PromotionEvent): Promise<void> {
@@ -86,7 +89,10 @@ export class PromotionService {
         });
         return;
       }
-      const text = promotionMessage(this.config.sms.expoName, check);
+      const { text, variables } = promotionMessage(
+        await this.expoNames.titleOf(check.expoId),
+        check,
+      );
       if (Buffer.byteLength(text, 'utf8') > 2000) {
         await this.store.save(
           { ...record, status: 'OPERATIONS', reason: 'MESSAGE_TOO_LONG' },
@@ -104,6 +110,15 @@ export class PromotionService {
         messageId: undefined,
         providerCode: undefined,
       };
+      // 알림톡 본문은 1,000자까지다. 긴 장소·주소로 넘으면 카톡 없이 문자로만 보낸다.
+      const kakaoOptions =
+        Array.from(text).length <= 1_000
+          ? kakaoOptionsFor(
+              this.config,
+              this.config.kakao?.auto.promotion,
+              variables,
+            )
+          : undefined;
       // Persist before the irreversible request; a crash or Redis failure must never reopen sending.
       await this.store.save(sending, token);
       const receipt = await this.sender.send(sending, {
@@ -113,6 +128,7 @@ export class PromotionService {
             ? this.config.sms.fromTraineeNumber
             : this.config.sms.fromStandardNumber,
         text,
+        ...(kakaoOptions && { kakaoOptions }),
       });
       switch (receipt.kind) {
         case 'accepted':

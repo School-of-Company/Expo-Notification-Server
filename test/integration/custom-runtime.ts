@@ -7,6 +7,7 @@ import Redis from 'ioredis';
 import { randomUUID } from 'node:crypto';
 import { createAppConfig } from '../fixtures/app-config.fixture';
 import { APP_CONFIG } from '../../src/config/app-config.constants';
+import { ExpoNameProvider } from '../../src/common/expo-name.provider';
 import { KAFKA_CLIENT } from '../../src/kafka/kafka.constants';
 import { SmsEventConsumer } from '../../src/sms/sms-event.consumer';
 import { SmsEventService } from '../../src/sms/sms-event.service';
@@ -325,6 +326,12 @@ export class CustomRuntime {
         {
           provide: ParticipantNamesProvider,
           useValue: { findNames: () => Promise.resolve(new Map()) },
+        },
+        {
+          provide: ExpoNameProvider,
+          useValue: {
+            titleOf: () => Promise.resolve(this.config.sms.expoName),
+          },
         },
       ],
     }).compile();

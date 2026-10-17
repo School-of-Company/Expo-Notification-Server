@@ -21,10 +21,11 @@ export async function solapiSendManyResponse(
 ): Promise<Response> {
   if (typeof init?.body !== 'string') throw new Error('missing solapi body');
   const body = JSON.parse(init.body) as { messages: OutgoingSms[] };
-  const messages = body.messages.map(({ to, from, text }) => ({
+  const messages = body.messages.map(({ to, from, text, kakaoOptions }) => ({
     to,
     from,
     text,
+    ...(kakaoOptions && { kakaoOptions }),
   }));
   const { failedMessageList } = await send(messages);
   return Response.json({
