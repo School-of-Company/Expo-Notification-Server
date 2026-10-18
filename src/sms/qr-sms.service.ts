@@ -3,6 +3,7 @@ import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { kakaoOptionsFor } from './kakao-message';
+import { KakaoSenderProvider } from './kakao-sender.provider';
 import { ParticipantNamesProvider } from './participant-names.provider';
 import { buildQrPageLinks } from './qr-page-links';
 import { ParticipantRegisteredEvent } from './participant-event.schema';
@@ -28,6 +29,7 @@ export class QrSmsService {
     private readonly dedupe: SmsEventDedupeStore,
     private readonly names: ParticipantNamesProvider,
     private readonly sender: SmsSenderProvider,
+    private readonly kakao: KakaoSenderProvider,
     private readonly sentPublisher: QrSmsSentPublisher,
     private readonly expoNames: ExpoNameProvider,
   ) {}
@@ -76,7 +78,7 @@ export class QrSmsService {
       if (Buffer.byteLength(text, 'utf8') > 2_000) {
         throw new QrLinkError('QR SMS exceeds single LMS byte limit');
       }
-      // 알림톡 본문은 1,000자까지다. 동행자가 많아 넘으면 카톡 없이 문자로만 보낸다.
+      // 알림톡 본문은 1,000자까지다. 동행자가 많아 넘으면 카톡은 빼고 문자로만 보낸다.
       const kakaoOptions =
         Array.from(text).length <= 1_000
           ? kakaoOptionsFor(
@@ -85,22 +87,26 @@ export class QrSmsService {
               variables,
             )
           : undefined;
+      const message = {
+        to: event.phoneNumber,
+        from: standard
+          ? this.config.sms.fromStandardNumber
+          : this.config.sms.fromTraineeNumber,
+        text,
+      };
       await beginSend();
-      const receipt = await this.sender.deliver(event.eventId, [
-        {
-          to: event.phoneNumber,
-          from: standard
-            ? this.config.sms.fromStandardNumber
-            : this.config.sms.fromTraineeNumber,
-          text,
-          ...(kakaoOptions && { kakaoOptions }),
-        },
-      ]);
+      const receipt = await this.sender.deliver(event.eventId, [message]);
       if (receipt.kind === 'rejected') {
         throw new SmsDeliveryRejectedError(`qr sms rejected: ${receipt.code}`);
       }
       if (receipt.kind === 'unknown' || receipt.failedTo.length > 0) {
         throw new SmsDeliveryUnknownError('qr sms acceptance unknown');
+      }
+      // 문자가 접수된 뒤에만 보내고 던지지 않는다. 카톡 결과는 재전달 여부에 영향을 주지 않는다.
+      if (kakaoOptions) {
+        await this.kakao.send([{ ...message, kakaoOptions }], {
+          eventId: event.eventId,
+        });
       }
     });
 

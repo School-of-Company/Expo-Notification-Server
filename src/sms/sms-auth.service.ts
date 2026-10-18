@@ -10,6 +10,7 @@ import {
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { kakaoOptionsFor } from './kakao-message';
+import { KakaoSenderProvider } from './kakao-sender.provider';
 import { renderAuthCodeSms } from './sms-message.templates';
 import { SmsAuthStore } from './sms-auth.store';
 import { SmsSenderProvider } from './sms-sender.provider';
@@ -22,6 +23,7 @@ export class SmsAuthService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly store: SmsAuthStore,
     private readonly sender: SmsSenderProvider,
+    private readonly kakao: KakaoSenderProvider,
   ) {}
 
   async sendCode(phoneNumber: string): Promise<void> {
@@ -63,19 +65,17 @@ export class SmsAuthService {
       this.config.kakao?.auto.authCode,
       variables,
     );
-    const { failedTo } = await this.sender.send([
-      {
-        to: phoneNumber,
-        from: fromStandardNumber,
-        text,
-        ...(kakaoOptions && { kakaoOptions }),
-      },
-    ]);
+    const message = { to: phoneNumber, from: fromStandardNumber, text };
+    const { failedTo } = await this.sender.send([message]);
     if (failedTo.length > 0) {
       throw new HttpException(
         '인증번호 발송에 실패했습니다.',
         HttpStatus.BAD_GATEWAY,
       );
+    }
+    // 문자가 접수된 뒤에만 보낸다. 문자 실패로 다시 요청해도 카톡이 쌓이지 않는다.
+    if (kakaoOptions) {
+      await this.kakao.send([{ ...message, kakaoOptions }]);
     }
   }
 

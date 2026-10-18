@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
 import {
   AdminGroupMessageController,
   AdminGroupMessageInternalGuard,
@@ -29,6 +30,7 @@ import { AdminGroupMessageHistoryStore } from './admin-group-message-history.sto
     AdminGroupMessageHistoryService,
     AdminGroupMessageHistoryInternalGuard,
     GroupMessageSolapiProvider,
+    KakaoSenderProvider,
     { provide: GROUP_MESSAGE_SENDER, useExisting: GroupMessageSolapiProvider },
   ],
 })

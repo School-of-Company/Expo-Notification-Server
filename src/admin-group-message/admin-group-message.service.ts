@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
 import { maskPhone } from '../common/mask-phone';
+import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
 import {
   type AuthorizeGroupMessage,
   type CreateGroupMessagePreview,
@@ -21,6 +22,7 @@ import {
   GROUP_MESSAGE_SENDER,
   type GroupMessageSender,
   type GroupMessageTargetRecord,
+  groupKakaoMessage,
 } from './group-message-sender.interface';
 
 @Injectable()
@@ -29,6 +31,7 @@ export class AdminGroupMessageService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly store: AdminGroupMessageStore,
     @Inject(GROUP_MESSAGE_SENDER) private readonly sender: GroupMessageSender,
+    private readonly kakao: KakaoSenderProvider,
   ) {}
 
   configResponse() {
@@ -223,6 +226,18 @@ export class AdminGroupMessageService {
       }
       job.status = this.jobStatus(job);
       await this.store.save(job, token);
+      // ACCEPTED를 저장한 뒤에 보낸다. 상태·전달 확인은 문자 messageId만 따르고, 카톡 실패는 재시도하지 않는다.
+      const kakaoMessage =
+        receipt.kind === 'accepted'
+          ? groupKakaoMessage(this.config, job, sending)
+          : undefined;
+      if (kakaoMessage && sending.attemptId) {
+        await this.kakao.send([kakaoMessage], {
+          jobId: job.jobId,
+          targetId: sending.targetId,
+          attemptId: sending.attemptId,
+        });
+      }
       return job.targets.some((target) => target.status === 'PENDING');
     } finally {
       await this.store.release(jobId, token);

@@ -4,6 +4,7 @@ import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { kakaoOptionsFor } from '../sms/kakao-message';
+import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
 import { PromotionApplicationProvider } from './promotion-application.provider';
 import { promotionMessage } from './promotion-message';
 import { PromotionSolapiProvider } from './promotion-solapi.provider';
@@ -22,6 +23,7 @@ export class PromotionService {
     private readonly application: PromotionApplicationProvider,
     private readonly sender: PromotionSolapiProvider,
     private readonly expoNames: ExpoNameProvider,
+    private readonly kakao: KakaoSenderProvider,
   ) {}
 
   async handle(event: PromotionEvent): Promise<void> {
@@ -100,17 +102,18 @@ export class PromotionService {
         );
         return;
       }
+      const attemptId = randomUUID();
       const sending: PromotionRecord = {
         ...record,
         status: 'SENDING',
-        attemptId: randomUUID(),
+        attemptId,
         attemptedAt: new Date().toISOString(),
         reason: undefined,
         groupId: undefined,
         messageId: undefined,
         providerCode: undefined,
       };
-      // 알림톡 본문은 1,000자까지다. 긴 장소·주소로 넘으면 카톡 없이 문자로만 보낸다.
+      // 알림톡 본문은 1,000자까지다. 긴 장소·주소로 넘으면 카톡은 빼고 문자로만 보낸다.
       const kakaoOptions =
         Array.from(text).length <= 1_000
           ? kakaoOptionsFor(
@@ -121,15 +124,15 @@ export class PromotionService {
           : undefined;
       // Persist before the irreversible request; a crash or Redis failure must never reopen sending.
       await this.store.save(sending, token);
-      const receipt = await this.sender.send(sending, {
+      const message = {
         to: check.representativePhoneNumber,
         from:
           check.programType === 'TRAINING'
             ? this.config.sms.fromTraineeNumber
             : this.config.sms.fromStandardNumber,
         text,
-        ...(kakaoOptions && { kakaoOptions }),
-      });
+      };
+      const receipt = await this.sender.send(sending, message);
       switch (receipt.kind) {
         case 'accepted':
           await this.store.save(
@@ -141,6 +144,13 @@ export class PromotionService {
             },
             token,
           );
+          // ACCEPTED를 저장한 뒤에 보낸다. 원장은 문자 messageId만 추적하고, 카톡 실패는 재시도하지 않는다.
+          if (kakaoOptions) {
+            await this.kakao.send([{ ...message, kakaoOptions }], {
+              eventId: id,
+              attemptId,
+            });
+          }
           return;
         case 'rejected':
           await this.store.save(

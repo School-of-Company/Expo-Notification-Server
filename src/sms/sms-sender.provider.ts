@@ -3,7 +3,6 @@ import { SolapiMessageService } from 'solapi';
 import { z } from 'zod';
 import type { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
-import type { KakaoOptions } from './kakao-message';
 import { solapiRequest } from './solapi-request';
 import { SOLAPI_CLIENT } from './sms.constants';
 
@@ -11,7 +10,6 @@ export interface OutgoingSms {
   to: string;
   from: string;
   text: string;
-  kakaoOptions?: KakaoOptions;
 }
 
 export interface SmsSendResult {
