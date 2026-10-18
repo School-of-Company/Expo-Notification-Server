@@ -1,10 +1,11 @@
 import { renderTemplate, TemplateVariables } from './kakao-message';
 import { SenderType, SmsEvent } from './sms-event.schema';
 
-// 알림톡 템플릿 본문이자 문자 본문이다. docs/kakao-alimtalk-setup.md K1~K4와 글자 하나까지 같아야 한다.
+// 알림톡 템플릿 본문이자 문자 본문이다. 카카오 승인 본문과 글자 하나까지 같아야 한다.
 // 바꾸면 카카오 템플릿도 다시 신청해야 한다.
+// K1은 이미 승인된 템플릿(KA01TP26101108020717547GCB2BBgJ6)이라 행사명이 고정이고, "5분"은 sms.authCodeTtlSeconds 기본값과 맞춘다.
 export const AUTH_CODE_TEMPLATE =
-  '[#{행사명}] 인증번호 [#{인증번호}]를 3분 안에 입력해 주세요.';
+  '[AI교육원] 2026 AI 미래교육 박람회(AI·SW체험한마당) 신청 인증번호 #{인증번호}입니다. (5분 이내 입력)';
 export const QR_REGISTERED_TEMPLATE = [
   '#{행사명} 등록이 완료되었습니다.',
   '입장할 때 아래 QR 링크를 입구에서 보여 주세요.',
@@ -60,14 +61,8 @@ export function renderSms(event: SmsEvent): RenderedSms {
   }
 }
 
-export function renderAuthCodeSms(
-  expoName: string,
-  code: string,
-): TemplateMessage {
-  return fromTemplate(AUTH_CODE_TEMPLATE, {
-    '#{행사명}': expoName,
-    '#{인증번호}': code,
-  });
+export function renderAuthCodeSms(code: string): TemplateMessage {
+  return fromTemplate(AUTH_CODE_TEMPLATE, { '#{인증번호}': code });
 }
 
 export function renderQrSms(params: {

@@ -14,7 +14,7 @@ const base = { eventId: 'e1', version: 1 as const };
 describe('알림톡 템플릿 상수', () => {
   it('K1~K4 승인 신청 본문과 글자 그대로 같다', () => {
     expect(AUTH_CODE_TEMPLATE).toBe(
-      '[#{행사명}] 인증번호 [#{인증번호}]를 3분 안에 입력해 주세요.',
+      '[AI교육원] 2026 AI 미래교육 박람회(AI·SW체험한마당) 신청 인증번호 #{인증번호}입니다. (5분 이내 입력)',
     );
     expect(QR_REGISTERED_TEMPLATE).toBe(
       '#{행사명} 등록이 완료되었습니다.\n입장할 때 아래 QR 링크를 입구에서 보여 주세요.\n\n#{QR링크}\n(문의) ☎#{문의번호}',
@@ -63,10 +63,10 @@ describe('renderSms', () => {
 });
 
 describe('renderAuthCodeSms', () => {
-  it('행사명과 인증번호를 K1 문구에 넣는다', () => {
-    expect(renderAuthCodeSms('광주 박람회', '0123')).toEqual({
-      text: '[광주 박람회] 인증번호 [0123]를 3분 안에 입력해 주세요.',
-      variables: { '#{행사명}': '광주 박람회', '#{인증번호}': '0123' },
+  it('인증번호를 승인된 K1 문구에 넣는다', () => {
+    expect(renderAuthCodeSms('0123')).toEqual({
+      text: '[AI교육원] 2026 AI 미래교육 박람회(AI·SW체험한마당) 신청 인증번호 0123입니다. (5분 이내 입력)',
+      variables: { '#{인증번호}': '0123' },
     });
   });
 });

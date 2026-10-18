@@ -18,6 +18,7 @@ const phoneNumber = z.string().regex(/^01\d{8,9}$/);
 
 const sendCodeSchema = z.object({
   phoneNumber,
+  // 승인된 K1 문구에 행사명이 고정돼 쓰지 않는다. 이미 보내는 클라이언트가 400을 받지 않게 받기만 한다.
   expoId: expoIdSchema.optional(),
 });
 const verifyCodeSchema = z.object({
@@ -50,7 +51,7 @@ export class SmsController {
   @HttpCode(200)
   @UsePipes(new ZodValidationPipe(sendCodeSchema))
   async sendCode(@Body() body: SendCodeDto): Promise<void> {
-    await this.smsAuthService.sendCode(body.phoneNumber, body.expoId);
+    await this.smsAuthService.sendCode(body.phoneNumber);
   }
 
   @Post('verify')
