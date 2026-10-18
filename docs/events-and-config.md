@@ -202,7 +202,7 @@ redis:
 sms:                                   # 비밀 값은 Vault
   fromStandardNumber: "…"
   fromTraineeNumber: "…"
-  authCodeTtlSeconds: 180
+  authCodeTtlSeconds: 300
   authMaxSendCount: 5
   authMaxSendCountPerHour: 300
   eventMaxAttempts: 5
@@ -234,7 +234,9 @@ JSON 객체가 아니면 경로만 담은 에러로 부팅을 실패시킨다. �
   templateId가 하나라도 있으면 `pfId`가 필요하다. 키가 있으면 카톡을 먼저 보내고 실패하면 같은 본문을 문자로 보낸다
   (`disableSms: false`). 키가 없으면 문자로만 보낸다. 문구는 `src/sms/sms-message.templates.ts` 상수에 있다.
 - 본문이 알림톡 한도(1,000자)를 넘는 QR·승급 메시지는 카톡 없이 문자로만 보낸다.
-- `#{행사명}`은 이벤트(또는 `POST /sms`의 선택 `expoId`)의 박람회 제목이다. Expo `GET /internal/expo` 목록을 10분 캐시해서
+- K1 인증번호는 이미 승인된 템플릿 문구를 쓴다. 행사명이 고정이고 `#{인증번호}`만 바꾸며, 문구의 "5분"에 맞춰 `authCodeTtlSeconds` 기본값이 300이다.
+  `POST /sms`의 `expoId`는 받기만 한다.
+- `#{행사명}`은 이벤트의 박람회 제목이다. Expo `GET /internal/expo` 목록을 10분 캐시해서
   찾고, `expoId`가 없거나 목록에 없거나 조회가 실패하면 `sms.expoName`을 쓴다. 제목을 못 찾아도 발송은 막지 않는다.
 
 config-server 쪽에서 해야 할 일: `configs/notification-{local,dev,prod}.yml` 추가, `docs/service-configs.md` 표와

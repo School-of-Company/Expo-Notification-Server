@@ -12,7 +12,7 @@ class PhoneNumberDto {
 export class SendCodeDto extends PhoneNumberDto {
   @ApiPropertyOptional({
     description:
-      '인증 문구의 행사명으로 쓸 박람회 ID. 없거나 찾지 못하면 기본 행사명을 쓴다.',
+      '박람회 ID. 받기만 하고 쓰지 않는다(승인된 인증 문구에 행사명이 고정).',
     example: '00000000-0000-0000-0000-000000000000',
     pattern: '^[A-Za-z0-9_-]{1,36}$',
   })

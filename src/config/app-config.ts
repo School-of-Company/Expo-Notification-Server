@@ -96,7 +96,7 @@ const baseAppConfigSchema = z.object({
     apiSecret: z.string().min(1),
     fromStandardNumber: z.string().min(1),
     fromTraineeNumber: z.string().min(1),
-    authCodeTtlSeconds: z.coerce.number().int().positive().default(180),
+    authCodeTtlSeconds: z.coerce.number().int().positive().default(300),
     authMaxSendCount: z.coerce.number().int().positive().default(5),
     authMaxSendCountPerHour: z.coerce.number().int().positive().default(300),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),

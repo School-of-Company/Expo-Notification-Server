@@ -57,7 +57,7 @@ describe('Notification server (e2e)', () => {
   type SentSms = { to: string; from: string; text: string };
   const sentBatches = () => solapiSend.mock.calls as [SentSms[]][];
   const lastSentCode = () =>
-    /인증번호 \[(\d{4})\]/.exec(sentBatches().at(-1)![0][0].text)![1];
+    /인증번호 (\d{4})입니다/.exec(sentBatches().at(-1)![0][0].text)![1];
   const embedFields = (call: unknown[]) =>
     (
       JSON.parse((call[1] as RequestInit).body as string) as {
@@ -229,21 +229,14 @@ describe('Notification server (e2e)', () => {
       expect(solapiSend).toHaveBeenCalledTimes(config.sms.authMaxSendCount);
     });
 
-    it('expoId를 보내면 그 박람회 제목을 K1 문구의 행사명으로 쓰고, 없으면 기본 행사명을 쓴다', async () => {
+    it('expoId를 보내도 받기만 하고 승인된 K1 문구로 보낸다', async () => {
       await request(app.getHttpServer())
         .post('/sms')
         .send({ phoneNumber: '01012345678', expoId: 'expo-1' })
         .expect(200);
-      await request(app.getHttpServer())
-        .post('/sms')
-        .send({ phoneNumber: '01087654321' })
-        .expect(200);
 
       expect(sentBatches()[0][0][0].text).toMatch(
-        /^\[광주 박람회\] 인증번호 \[\d{4}\]를 3분 안에 입력해 주세요\.$/,
-      );
-      expect(sentBatches()[1][0][0].text).toMatch(
-        new RegExp(`^\\[${config.sms.expoName}\\] 인증번호 `),
+        /^\[AI교육원\] 2026 AI 미래교육 박람회\(AI·SW체험한마당\) 신청 인증번호 \d{4}입니다\. \(5분 이내 입력\)$/,
       );
     });
 

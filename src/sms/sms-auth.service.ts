@@ -9,7 +9,6 @@ import {
 } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
-import { ExpoNameProvider } from '../common/expo-name.provider';
 import { kakaoOptionsFor } from './kakao-message';
 import { renderAuthCodeSms } from './sms-message.templates';
 import { SmsAuthStore } from './sms-auth.store';
@@ -23,10 +22,9 @@ export class SmsAuthService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly store: SmsAuthStore,
     private readonly sender: SmsSenderProvider,
-    private readonly expoNames: ExpoNameProvider,
   ) {}
 
-  async sendCode(phoneNumber: string, expoId?: string): Promise<void> {
+  async sendCode(phoneNumber: string): Promise<void> {
     const { authCodeTtlSeconds, authMaxSendCount, fromStandardNumber } =
       this.config.sms;
 
@@ -59,10 +57,7 @@ export class SmsAuthService {
       );
     }
 
-    const { text, variables } = renderAuthCodeSms(
-      await this.expoNames.titleOf(expoId),
-      code,
-    );
+    const { text, variables } = renderAuthCodeSms(code);
     const kakaoOptions = kakaoOptionsFor(
       this.config,
       this.config.kakao?.auto.authCode,
