@@ -69,7 +69,7 @@ KAKAO 채널은 **카톡과 문자를 항상 둘 다** 보낸다. target마다 �
 같은 문구의 카톡을 따로 한 건 보낸다(`disableSms: true`, Solapi 대체 문자 끔). 수신자마다 문자와 카톡이 각각 과금되어 비용이
 약 2배이며 의도된 동작이다. target 상태와 전달 확인(`messageId`)은 문자만 따른다. 카톡 실패는 경고 로그만 남기고 target 상태를
 바꾸거나 재시도하지 않는다. 문자가 `FAILED`/`UNKNOWN`이면 카톡은 보내지 않는다.
-`fallbackToSms`는 하위 호환으로만 받는 boolean이다. 채널과 값에 상관없이 400을 내지 않으며 job에 저장만 하고 발송에는 쓰지 않는다.
+`fallbackToSms`는 하위 호환으로만 받는 선택 boolean이다. 생략해도 되고, 채널과 값에 상관없이 400을 내지 않으며 job에 저장만 하고 발송에는 쓰지 않는다.
 `adminGroupMessaging.kakao`가
 없거나 disabled이면 config가 `KAKAO.enabled=false`, `templates=[]`를 반환하고 Kakao preview는 422다.
 template 설정은 Solapi `pfId`, 승인 template ID/content, 의미 이름에서 실제 승인 변수 이름

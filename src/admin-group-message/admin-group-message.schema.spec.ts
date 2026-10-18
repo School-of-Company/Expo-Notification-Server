@@ -44,12 +44,17 @@ describe('createGroupMessagePreviewSchema', () => {
       ).toBe(true);
   });
 
-  it('fallbackToSms가 없거나 boolean이 아니면 거절한다', () => {
-    for (const fallbackToSms of [undefined, 'true'])
-      expect(
-        createGroupMessagePreviewSchema.safeParse(preview({ fallbackToSms }))
-          .success,
-      ).toBe(false);
+  it('fallbackToSms는 생략할 수 있고 boolean이 아니면 거절한다', () => {
+    expect(
+      createGroupMessagePreviewSchema.safeParse(
+        preview({ fallbackToSms: undefined }),
+      ).success,
+    ).toBe(true);
+    expect(
+      createGroupMessagePreviewSchema.safeParse(
+        preview({ fallbackToSms: 'true' }),
+      ).success,
+    ).toBe(false);
   });
 
   it('expoName·status 변수는 200자까지 받는다', () => {

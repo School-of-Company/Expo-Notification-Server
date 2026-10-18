@@ -52,8 +52,8 @@ export const createGroupMessagePreviewSchema = z
     targetFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     channel: z.enum(['SMS', 'KAKAO']),
     templateId: id.optional(),
-    // 하위 호환으로만 받는다. 값과 상관없이 KAKAO는 카톡과 문자를 둘 다 보낸다.
-    fallbackToSms: z.boolean(),
+    // 하위 호환으로만 받는다(생략 가능). 값과 상관없이 KAKAO는 카톡과 문자를 둘 다 보낸다.
+    fallbackToSms: z.boolean().optional(),
     targets: z.array(groupMessageTargetSchema).min(1).max(5000),
   })
   .strict()
