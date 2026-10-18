@@ -7,6 +7,7 @@ import {
   SmsDeliveryUnknownError,
 } from './sms-errors';
 import { kakaoOptionsFor } from './kakao-message';
+import { KakaoSenderProvider } from './kakao-sender.provider';
 import { SmsEvent } from './sms-event.schema';
 import { SmsEventGuard } from './sms-event.guard';
 import { renderSms } from './sms-message.templates';
@@ -20,6 +21,7 @@ export class SmsEventService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly guard: SmsEventGuard,
     private readonly sender: SmsSenderProvider,
+    private readonly kakao: KakaoSenderProvider,
   ) {}
 
   async handle(event: SmsEvent): Promise<void> {
@@ -38,16 +40,10 @@ export class SmsEventService {
           ? this.config.sms.fromTraineeNumber
           : this.config.sms.fromStandardNumber;
 
+      const messages = to.map((recipient) => ({ to: recipient, from, text }));
+
       await beginSend();
-      const receipt = await this.sender.deliver(
-        event.eventId,
-        to.map((recipient) => ({
-          to: recipient,
-          from,
-          text,
-          ...(kakaoOptions && { kakaoOptions }),
-        })),
-      );
+      const receipt = await this.sender.deliver(event.eventId, messages);
 
       if (receipt.kind === 'rejected') {
         throw new SmsDeliveryRejectedError(
@@ -62,6 +58,13 @@ export class SmsEventService {
       if (failedTo.length > 0) {
         this.logger.warn(
           `일부 수신자 발송 실패: eventId=${event.eventId}, failed=${failedTo.length}/${to.length}, to=${failedTo.map(maskPhone).join(',')}`,
+        );
+      }
+      // 문자가 접수된 뒤에만 보내고 던지지 않는다. 카톡 결과는 재전달 여부에 영향을 주지 않는다.
+      if (kakaoOptions) {
+        await this.kakao.send(
+          messages.map((message) => ({ ...message, kakaoOptions })),
+          { eventId: event.eventId },
         );
       }
     });

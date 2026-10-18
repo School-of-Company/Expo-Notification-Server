@@ -231,9 +231,13 @@ env `KAKAO_CONFIG_FILE`에 JSON 파일 경로를 주면 env 설정 위에 합친
 JSON 객체가 아니면 경로만 담은 에러로 부팅을 실패시킨다. 모양은 [알림톡 계획 4장](kakao-alimtalk-plan.md)을 따른다.
 
 - `kakao.pfId`, `kakao.auto.{authCode,qrRegistered,promotion,drawResult}`: 자동 메시지 K1~K4의 templateId. 모두 선택이고,
-  templateId가 하나라도 있으면 `pfId`가 필요하다. 키가 있으면 카톡을 먼저 보내고 실패하면 같은 본문을 문자로 보낸다
-  (`disableSms: false`). 키가 없으면 문자로만 보낸다. 문구는 `src/sms/sms-message.templates.ts` 상수에 있다.
-- 본문이 알림톡 한도(1,000자)를 넘는 QR·승급 메시지는 카톡 없이 문자로만 보낸다.
+  templateId가 하나라도 있으면 `pfId`가 필요하다. 키가 있으면 **카톡과 문자를 항상 둘 다** 보낸다. 문자를 먼저 보내고,
+  문자가 접수되면 같은 본문의 카톡을 따로 한 건 보낸다(`disableSms: true`, Solapi 대체 문자 끔). 카톡이 없는 번호는 카톡만
+  실패하고 문자는 받는다. 키가 없으면 문자로만 보낸다. 문구는 `src/sms/sms-message.templates.ts` 상수에 있다.
+- **비용**: templateId가 설정된 메시지는 수신자마다 문자와 카톡이 각각 과금되어 비용이 약 2배다. 의도된 동작이다.
+- 성공·실패는 문자 기준으로 판정한다(인증번호 502, Kafka 재전달, 승급 원장 상태). 카톡 실패·결과 불명은 마스킹한 번호로
+  경고 로그만 남기고 재전달·재시도하지 않는다. 문자가 실패하면 카톡은 보내지 않아서, 재전달 때 카톡이 쌓이지 않는다.
+- 본문이 알림톡 한도(1,000자)를 넘는 QR·승급 메시지는 카톡은 빼고 문자로만 보낸다.
 - K1 인증번호는 이미 승인된 템플릿 문구를 쓴다. 행사명이 고정이고 `#{인증번호}`만 바꾸며, 문구의 "5분"에 맞춰 `authCodeTtlSeconds` 기본값이 300이다.
   `POST /sms`의 `expoId`는 받기만 한다.
 - `#{행사명}`은 이벤트의 박람회 제목이다. Expo `GET /internal/expo` 목록을 10분 캐시해서
@@ -257,6 +261,6 @@ Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행
 관리자 그룹 발송의 내부 HTTP payload, 상태 전이, 중복/timeout 처리와 Kakao 승인 template 설정은
 [Notification #10 계약](notification-10-admin-group-messaging.md)에 기록한다. 기능은
 `adminGroupMessaging.enabled`가 true이고 32자 이상의 `internalToken`이 설정된 환경에서만 발송한다.
-Kakao 설정이 없으면 SMS만 사용할 수 있으며 Kakao의 SMS 자동 대체는 꺼져 있다.
+Kakao 설정이 없으면 SMS만 사용할 수 있다. KAKAO 채널은 같은 렌더링 문구로 카톡과 문자를 항상 둘 다 보낸다(Solapi 자동 대체는 끔).
 행사별 문자 처리이력의 기간·유형·커서 페이지, 기존 `retentionSeconds` 사용과 Application 권한 접합은
 [Notification #42 계약](notification-42-admin-message-history.md)에 기록한다. 추가 env/config는 없다.

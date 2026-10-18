@@ -9,6 +9,7 @@ import {
   type GroupMessageReceipt,
   type GroupMessageSender,
   type GroupMessageTargetRecord,
+  groupKakaoMessage,
   senderPhone,
 } from './group-message-sender.interface';
 
@@ -68,29 +69,9 @@ export class GroupMessageSolapiProvider implements GroupMessageSender {
   ): Promise<GroupMessageReceipt> {
     if (!target.recipientPhone || !target.content || !target.attemptId)
       return { kind: 'unknown' };
-    const kakao = this.config.adminGroupMessaging?.kakao;
-    const template = kakao?.templates.find(
-      (item) => item.id === job.templateId,
-    );
-    const kakaoOptions =
-      job.channel === 'KAKAO' && kakao?.enabled && template
-        ? {
-            pfId: kakao.pfId,
-            templateId: template.providerTemplateId,
-            variables: Object.fromEntries(
-              Object.entries(template.variableMapping).map(
-                ([semanticName, providerName]) => [
-                  providerName,
-                  target.templateVariables?.[
-                    semanticName as keyof typeof target.templateVariables
-                  ],
-                ],
-              ),
-            ),
-            disableSms: !job.fallbackToSms,
-          }
-        : undefined;
-    if (job.channel === 'KAKAO' && !kakaoOptions) return { kind: 'unknown' };
+    // 카톡 건은 문자가 접수된 뒤 서비스가 따로 보낸다. 여기서는 KAKAO 설정이 온전한지만 확인한다.
+    if (job.channel === 'KAKAO' && !groupKakaoMessage(this.config, job, target))
+      return { kind: 'unknown' };
     try {
       const response = await this.request('/messages/v4/send-many/detail', {
         messages: [
@@ -98,7 +79,6 @@ export class GroupMessageSolapiProvider implements GroupMessageSender {
             to: target.recipientPhone,
             from: senderPhone(this.config, target),
             text: target.content,
-            ...(kakaoOptions ? { kakaoOptions } : {}),
             customFields: {
               jobId: job.jobId,
               targetId: target.targetId,

@@ -3,6 +3,7 @@ import { SolapiMessageService } from 'solapi';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { ExpoNameProvider } from '../common/expo-name.provider';
+import { KakaoSenderProvider } from './kakao-sender.provider';
 import { ParticipantNamesProvider } from './participant-names.provider';
 import { ParticipantRegisteredConsumer } from './participant-registered.consumer';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
@@ -27,6 +28,7 @@ import { SmsController } from './sms.controller';
         new SolapiMessageService(config.sms.apiKey, config.sms.apiSecret),
     },
     SmsSenderProvider,
+    KakaoSenderProvider,
     ExpoNameProvider,
     SmsAuthStore,
     SmsEventDedupeStore,

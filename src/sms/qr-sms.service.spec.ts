@@ -7,7 +7,9 @@ import { FakeRedis } from '../../test/fixtures/fake-redis';
 import {
   isSolapiUrl,
   solapiSendManyResponse,
+  type SolapiOutgoing,
 } from '../../test/fixtures/solapi-fetch.fixture';
+import { KakaoSenderProvider } from './kakao-sender.provider';
 import type { ParticipantRegisteredEvent } from './participant-event.schema';
 import { ParticipantNamesProvider } from './participant-names.provider';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
@@ -21,7 +23,7 @@ import {
 } from './sms-errors';
 import { SmsEventDedupeStore } from './sms-event-dedupe.store';
 import { SmsEventGuard } from './sms-event.guard';
-import { SmsSenderProvider, type OutgoingSms } from './sms-sender.provider';
+import { SmsSenderProvider } from './sms-sender.provider';
 import { SOLAPI_CLIENT } from './sms.constants';
 
 const standard: ParticipantRegisteredEvent = {
@@ -40,7 +42,7 @@ describe('QrSmsService', () => {
   let store: SmsEventDedupeStore;
   const send = jest.fn<
     Promise<{ failedMessageList: { to: string }[] }>,
-    [OutgoingSms[]]
+    [SolapiOutgoing[]]
   >();
   const publish = jest.fn<Promise<void>, [unknown]>();
   const titleOf = jest.fn<Promise<string>, [string | undefined]>();
@@ -77,6 +79,7 @@ describe('QrSmsService', () => {
         SmsEventGuard,
         ParticipantNamesProvider,
         SmsSenderProvider,
+        KakaoSenderProvider,
         QrSmsService,
       ],
     }).compile();
@@ -93,28 +96,78 @@ describe('QrSmsService', () => {
       'a'.repeat(22) +
       '\n(문의) ☎062-380-4504';
 
-    it('templateId가 있으면 대체 발송을 켠 kakaoOptions와 템플릿 문구를 보낸다', async () => {
+    it('templateId가 있으면 문자를 먼저 보내고 같은 문구의 카톡(disableSms: true)을 따로 한 건 보낸다', async () => {
       config.kakao = { pfId: 'pf-1', auto: { qrRegistered: 'k2' } };
 
       await service.handle(standard);
 
-      expect(send.mock.calls[0]?.[0][0]).toEqual({
+      const sms = {
         to: standard.phoneNumber,
         from: config.sms.fromStandardNumber,
         text: expected,
-        kakaoOptions: {
-          pfId: 'pf-1',
-          templateId: 'k2',
-          disableSms: false,
-          variables: {
-            '#{행사명}': '광주 박람회',
-            '#{QR링크}':
-              '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
-              'a'.repeat(22),
-            '#{문의번호}': '062-380-4504',
+      };
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send.mock.calls[0]?.[0]).toStrictEqual([sms]);
+      expect(send.mock.calls[1]?.[0]).toEqual([
+        {
+          ...sms,
+          kakaoOptions: {
+            pfId: 'pf-1',
+            templateId: 'k2',
+            disableSms: true,
+            variables: {
+              '#{행사명}': '광주 박람회',
+              '#{QR링크}':
+                '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
+                'a'.repeat(22),
+              '#{문의번호}': '062-380-4504',
+            },
           },
         },
+      ]);
+      expect(publish).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      [
+        'failed',
+        () =>
+          send.mockResolvedValueOnce({
+            failedMessageList: [{ to: standard.phoneNumber }],
+          }),
+      ],
+      [
+        'network-error',
+        () => send.mockRejectedValueOnce(new Error('kakao socket hang up')),
+      ],
+    ])(
+      '카톡이 실패해도(%s) 문자가 접수되면 완료하고 재전달에도 문자·카톡을 다시 보내지 않는다',
+      async (_, failKakao) => {
+        config.kakao = { pfId: 'pf-1', auto: { qrRegistered: 'k2' } };
+        send.mockResolvedValueOnce({ failedMessageList: [] });
+        failKakao();
+
+        await expect(service.handle(standard)).resolves.toBeUndefined();
+        await service.handle(standard);
+
+        expect(send).toHaveBeenCalledTimes(2);
+        expect(send.mock.calls[0]?.[0][0]).not.toHaveProperty('kakaoOptions');
+        expect(await redis.get('sms:event:e1')).not.toBe('unknown');
+        expect(publish).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('문자가 거부되면 지금처럼 던지고 카톡은 보내지 않는다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: { qrRegistered: 'k2' } };
+      send.mockResolvedValueOnce({
+        failedMessageList: [{ to: standard.phoneNumber }],
       });
+
+      await expect(service.handle(standard)).rejects.toBeInstanceOf(
+        SmsDeliveryRejectedError,
+      );
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(publish).not.toHaveBeenCalled();
     });
 
     it('templateId가 없으면 kakaoOptions 없이 같은 문구를 문자로 보낸다', async () => {
@@ -136,6 +189,7 @@ describe('QrSmsService', () => {
 
       await service.handle(standard);
 
+      expect(send).toHaveBeenCalledTimes(1);
       expect(send.mock.calls[0]?.[0][0]).not.toHaveProperty('kakaoOptions');
     });
   });

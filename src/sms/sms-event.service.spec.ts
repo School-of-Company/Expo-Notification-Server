@@ -1,5 +1,10 @@
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import {
+  mockKakaoFetch,
+  sentKakaoMessages,
+} from '../../test/fixtures/kakao-fetch.fixture';
+import { KakaoSenderProvider } from './kakao-sender.provider';
+import {
   SmsDeliveryRejectedError,
   SmsDeliveryUnknownError,
 } from './sms-errors';
@@ -56,33 +61,74 @@ describe('SmsEventService', () => {
       config,
       new SmsEventGuard(dedupe as unknown as SmsEventDedupeStore),
       sender as unknown as SmsSenderProvider,
+      new KakaoSenderProvider(config),
     );
     config.kakao = undefined;
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   describe('알림톡(K4)', () => {
     const text =
       '축 당첨! 설문조사 행운의 숫자에 당첨되셨습니다. 선물은 입구 운영본부에서 받아가세요!\n3번!';
 
-    it('DRAW_RESULT templateId가 있으면 대체 발송을 켠 kakaoOptions를 붙인다', async () => {
+    it('DRAW_RESULT templateId가 있으면 문자 한 건과 카톡(disableSms: true) 한 건을 보낸다', async () => {
       config.kakao = { pfId: 'pf-1', auto: { drawResult: 'k4' } };
+      const fetch = mockKakaoFetch();
 
       await service.handle({ ...drawResult, expoId: 'expo-1' });
 
-      expect(sender.deliver).toHaveBeenCalledWith('e1', [
+      const sms = {
+        to: '01012345678',
+        from: config.sms.fromStandardNumber,
+        text,
+      };
+      expect(
+        (sender.deliver.mock.calls[0] as [string, unknown])[1],
+      ).toStrictEqual([sms]);
+      expect(sentKakaoMessages(fetch)).toEqual([
         {
-          to: '01012345678',
-          from: config.sms.fromStandardNumber,
-          text,
+          ...sms,
           kakaoOptions: {
             pfId: 'pf-1',
             templateId: 'k4',
             variables: { '#{번호}': '3' },
-            disableSms: false,
+            disableSms: true,
           },
+          customFields: { eventId: 'e1' },
         },
       ]);
+      expect(dedupe.complete).toHaveBeenCalledWith('e1');
     });
+
+    it.each(['failed', 'network-error'] as const)(
+      '카톡이 실패해도(%s) 문자가 접수되면 완료 처리하고 던지지 않는다',
+      async (outcome) => {
+        config.kakao = { pfId: 'pf-1', auto: { drawResult: 'k4' } };
+        mockKakaoFetch(outcome);
+
+        await expect(service.handle(drawResult)).resolves.toBeUndefined();
+        expect(dedupe.complete).toHaveBeenCalledWith('e1');
+        expect(dedupe.markUnknown).not.toHaveBeenCalled();
+        expect(dedupe.release).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      [{ kind: 'rejected', code: '3059' }, SmsDeliveryRejectedError],
+      [{ kind: 'unknown' }, SmsDeliveryUnknownError],
+    ])(
+      '문자가 실패하면(%o) 지금처럼 던지고 카톡은 보내지 않는다',
+      async (receipt, error) => {
+        config.kakao = { pfId: 'pf-1', auto: { drawResult: 'k4' } };
+        const fetch = mockKakaoFetch();
+        sender.deliver.mockResolvedValue(receipt);
+
+        await expect(service.handle(drawResult)).rejects.toBeInstanceOf(error);
+        expect(fetch).not.toHaveBeenCalled();
+        expect(dedupe.complete).not.toHaveBeenCalled();
+      },
+    );
 
     it('templateId가 없으면 kakaoOptions 없이 같은 문구를 문자로 보낸다', async () => {
       config.kakao = { pfId: 'pf-1', auto: { authCode: 'k1' } };
