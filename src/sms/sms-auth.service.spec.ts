@@ -4,7 +4,6 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
-import { ExpoNameProvider } from '../common/expo-name.provider';
 import { SmsAuthService } from './sms-auth.service';
 import { SmsAuthStore } from './sms-auth.store';
 import { SmsSenderProvider } from './sms-sender.provider';
@@ -20,7 +19,6 @@ describe('SmsAuthService', () => {
     markVerified: jest.Mock;
   };
   let sender: { send: jest.Mock };
-  let expoNames: { titleOf: jest.Mock };
   let service: SmsAuthService;
 
   beforeEach(() => {
@@ -35,13 +33,11 @@ describe('SmsAuthService', () => {
       markVerified: jest.fn().mockResolvedValue(true),
     };
     sender = { send: jest.fn().mockResolvedValue({ total: 1, failedTo: [] }) };
-    expoNames = { titleOf: jest.fn().mockResolvedValue('광주 박람회') };
     config.kakao = undefined;
     service = new SmsAuthService(
       config,
       store as unknown as SmsAuthStore,
       sender as unknown as SmsSenderProvider,
-      expoNames as unknown as ExpoNameProvider,
     );
   });
 
@@ -57,16 +53,15 @@ describe('SmsAuthService', () => {
     };
 
     it('4자리 숫자 코드를 저장하고 K1 문구로 일반 참가자 발신번호에서 문자로만 발송한다', async () => {
-      await service.sendCode('01012345678', 'expo-1');
+      await service.sendCode('01012345678');
 
       const code = savedCode();
       expect(code).toMatch(/^\d{4}$/);
-      expect(expoNames.titleOf).toHaveBeenCalledWith('expo-1');
       expect(sender.send).toHaveBeenCalledWith([
         {
           to: '01012345678',
           from: config.sms.fromStandardNumber,
-          text: `[광주 박람회] 인증번호 [${code}]를 3분 안에 입력해 주세요.`,
+          text: `[AI교육원] 2026 AI 미래교육 박람회(AI·SW체험한마당) 신청 인증번호 ${code}입니다. (5분 이내 입력)`,
         },
       ]);
       expect(
@@ -75,28 +70,22 @@ describe('SmsAuthService', () => {
       expect(store.increaseSendCount).toHaveBeenCalledWith('01012345678', 180);
     });
 
-    it('expoId 없이 요청하면 제목 조회기에 undefined를 넘긴다(기본 행사명)', async () => {
-      await service.sendCode('01012345678');
-
-      expect(expoNames.titleOf).toHaveBeenCalledWith(undefined);
-    });
-
     it('templateId가 있으면 같은 문구에 대체 발송을 켠 kakaoOptions를 붙인다', async () => {
       config.kakao = { pfId: 'pf-1', auto: { authCode: 'k1' } };
 
-      await service.sendCode('01012345678', 'expo-1');
+      await service.sendCode('01012345678');
 
       const code = savedCode();
       expect(sender.send).toHaveBeenCalledWith([
         {
           to: '01012345678',
           from: config.sms.fromStandardNumber,
-          text: `[광주 박람회] 인증번호 [${code}]를 3분 안에 입력해 주세요.`,
+          text: `[AI교육원] 2026 AI 미래교육 박람회(AI·SW체험한마당) 신청 인증번호 ${code}입니다. (5분 이내 입력)`,
           kakaoOptions: {
             pfId: 'pf-1',
             templateId: 'k1',
             disableSms: false,
-            variables: { '#{행사명}': '광주 박람회', '#{인증번호}': code },
+            variables: { '#{인증번호}': code },
           },
         },
       ]);
