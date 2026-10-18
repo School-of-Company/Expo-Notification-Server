@@ -65,14 +65,18 @@ target의 권한 시간이 만료되거나 channel 설정이 사라지면 job은
 
 ## Kakao와 공급자 설정
 
-`fallbackToSms`는 boolean이다. KAKAO에서 true면 카톡을 못 받는 번호에 같은 본문을 문자로 보낸다(`disableSms: false`).
-SMS 채널에서 true는 400이다. job은 `fallbackToSms`를 저장하며, 이 필드가 없는 예전 job은 대체 발송 없이 보낸다. `adminGroupMessaging.kakao`가
+KAKAO 채널은 **카톡과 문자를 항상 둘 다** 보낸다. target마다 렌더링 문구로 문자를 먼저 보내고, 문자가 `ACCEPTED`로 저장되면
+같은 문구의 카톡을 따로 한 건 보낸다(`disableSms: true`, Solapi 대체 문자 끔). 수신자마다 문자와 카톡이 각각 과금되어 비용이
+약 2배이며 의도된 동작이다. target 상태와 전달 확인(`messageId`)은 문자만 따른다. 카톡 실패는 경고 로그만 남기고 target 상태를
+바꾸거나 재시도하지 않는다. 문자가 `FAILED`/`UNKNOWN`이면 카톡은 보내지 않는다.
+`fallbackToSms`는 하위 호환으로만 받는 boolean이다. 채널과 값에 상관없이 400을 내지 않으며 job에 저장만 하고 발송에는 쓰지 않는다.
+`adminGroupMessaging.kakao`가
 없거나 disabled이면 config가 `KAKAO.enabled=false`, `templates=[]`를 반환하고 Kakao preview는 422다.
 template 설정은 Solapi `pfId`, 승인 template ID/content, 의미 이름에서 실제 승인 변수 이름
 (`#{승인변수명}`)으로 가는 명시적 mapping을 포함한다. preview의 렌더링 문구가 설정된 승인 content를
 해당 변수로 치환한 결과와 정확히 같아야 한다. 실제 승인 template/프로필 설정과 운영 연결은 #28 범위다.
 
-Solapi 전송은 message마다 `fetch` 한 번만 호출한다. SDK나 애플리케이션 수준의 묵시적 retry는 없고,
+Solapi 전송은 message(문자·카톡 각각)마다 `fetch` 한 번만 호출한다. SDK나 애플리케이션 수준의 묵시적 retry는 없고,
 SMS는 UTF-8 2,000 bytes, Kakao 승인 본문 치환 결과는 Unicode 1,000 characters 이하여야 한다.
 표준/연수 발신번호는 target `programType`과 기존 `sms.fromStandardNumber`/
 `sms.fromTraineeNumber` 설정으로 선택한다.

@@ -25,14 +25,14 @@ describe('renderTemplate', () => {
 describe('kakaoOptionsFor', () => {
   const variables = { '#{번호}': '7' };
 
-  it('templateId가 있으면 대체 문자 발송을 켠 kakaoOptions를 만든다', () => {
+  it('templateId가 있으면 대체 문자를 끈(disableSms: true) kakaoOptions를 만든다', () => {
     const config = { ...createAppConfig(), kakao: { pfId: 'pf', auto: {} } };
 
     expect(kakaoOptionsFor(config, 'k4', variables)).toEqual({
       pfId: 'pf',
       templateId: 'k4',
       variables,
-      disableSms: false,
+      disableSms: true,
     });
   });
 

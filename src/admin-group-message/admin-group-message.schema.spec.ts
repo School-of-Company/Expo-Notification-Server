@@ -35,19 +35,13 @@ describe('createGroupMessagePreviewSchema', () => {
       ).toBe(true);
   });
 
-  it('SMS에 fallbackToSms true는 거절하고 false는 받는다', () => {
-    const sms = { channel: 'SMS', templateId: undefined };
-
-    expect(
-      createGroupMessagePreviewSchema.safeParse(
-        preview({ ...sms, fallbackToSms: true }),
-      ).error?.issues[0]?.path,
-    ).toEqual(['fallbackToSms']);
-    expect(
-      createGroupMessagePreviewSchema.safeParse(
-        preview({ ...sms, fallbackToSms: false }),
-      ).success,
-    ).toBe(true);
+  it('SMS도 fallbackToSms true/false를 모두 받는다(하위 호환)', () => {
+    for (const fallbackToSms of [true, false])
+      expect(
+        createGroupMessagePreviewSchema.safeParse(
+          preview({ channel: 'SMS', templateId: undefined, fallbackToSms }),
+        ).success,
+      ).toBe(true);
   });
 
   it('fallbackToSms가 없거나 boolean이 아니면 거절한다', () => {

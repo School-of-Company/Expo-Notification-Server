@@ -4,6 +4,11 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
+import {
+  mockKakaoFetch,
+  sentKakaoMessages,
+} from '../../test/fixtures/kakao-fetch.fixture';
+import { KakaoSenderProvider } from './kakao-sender.provider';
 import { SmsAuthService } from './sms-auth.service';
 import { SmsAuthStore } from './sms-auth.store';
 import { SmsSenderProvider } from './sms-sender.provider';
@@ -38,8 +43,11 @@ describe('SmsAuthService', () => {
       config,
       store as unknown as SmsAuthStore,
       sender as unknown as SmsSenderProvider,
+      new KakaoSenderProvider(config),
     );
   });
+
+  afterEach(() => jest.restoreAllMocks());
 
   describe('sendCode', () => {
     const savedCode = () => {
@@ -70,25 +78,52 @@ describe('SmsAuthService', () => {
       expect(store.increaseSendCount).toHaveBeenCalledWith('01012345678', 180);
     });
 
-    it('templateId가 있으면 같은 문구에 대체 발송을 켠 kakaoOptions를 붙인다', async () => {
+    it('templateId가 있으면 같은 문구로 문자 한 건과 카톡(disableSms: true) 한 건을 보낸다', async () => {
       config.kakao = { pfId: 'pf-1', auto: { authCode: 'k1' } };
+      const fetch = mockKakaoFetch();
 
       await service.sendCode('01012345678');
 
       const code = savedCode();
-      expect(sender.send).toHaveBeenCalledWith([
+      const sms = {
+        to: '01012345678',
+        from: config.sms.fromStandardNumber,
+        text: `[AI교육원] 2026 AI 미래교육 박람회(AI·SW체험한마당) 신청 인증번호 ${code}입니다. (5분 이내 입력)`,
+      };
+      expect(sender.send).toHaveBeenCalledWith([sms]);
+      expect(sentKakaoMessages(fetch)).toEqual([
         {
-          to: '01012345678',
-          from: config.sms.fromStandardNumber,
-          text: `[AI교육원] 2026 AI 미래교육 박람회(AI·SW체험한마당) 신청 인증번호 ${code}입니다. (5분 이내 입력)`,
+          ...sms,
           kakaoOptions: {
             pfId: 'pf-1',
             templateId: 'k1',
-            disableSms: false,
+            disableSms: true,
             variables: { '#{인증번호}': code },
           },
         },
       ]);
+    });
+
+    it.each(['failed', 'network-error'] as const)(
+      '카톡이 실패해도(%s) 문자가 접수되면 성공이다',
+      async (outcome) => {
+        config.kakao = { pfId: 'pf-1', auto: { authCode: 'k1' } };
+        const fetch = mockKakaoFetch(outcome);
+
+        await expect(service.sendCode('01012345678')).resolves.toBeUndefined();
+        expect(fetch).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('문자가 실패하면 502이고 카톡은 보내지 않는다', async () => {
+      config.kakao = { pfId: 'pf-1', auto: { authCode: 'k1' } };
+      const fetch = mockKakaoFetch();
+      sender.send.mockResolvedValue({ total: 1, failedTo: ['01012345678'] });
+
+      await expect(service.sendCode('01012345678')).rejects.toMatchObject({
+        status: 502,
+      });
+      expect(fetch).not.toHaveBeenCalled();
     });
 
     it('요청 횟수 상한을 넘으면 429이고 발송하지 않는다', async () => {

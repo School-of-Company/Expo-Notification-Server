@@ -52,7 +52,7 @@ export const createGroupMessagePreviewSchema = z
     targetFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     channel: z.enum(['SMS', 'KAKAO']),
     templateId: id.optional(),
-    // true면 카톡을 못 받는 번호에 같은 내용을 문자로 보낸다.
+    // 하위 호환으로만 받는다. 값과 상관없이 KAKAO는 카톡과 문자를 둘 다 보낸다.
     fallbackToSms: z.boolean(),
     targets: z.array(groupMessageTargetSchema).min(1).max(5000),
   })
@@ -69,12 +69,6 @@ export const createGroupMessagePreviewSchema = z
         code: 'custom',
         path: ['templateId'],
         message: 'templateId is only valid for KAKAO',
-      });
-    if (value.channel === 'SMS' && value.fallbackToSms)
-      context.addIssue({
-        code: 'custom',
-        path: ['fallbackToSms'],
-        message: 'fallbackToSms is only valid for KAKAO',
       });
     if (
       new Set(value.targets.map((target) => target.targetId)).size !==
@@ -151,7 +145,7 @@ export const groupMessageJobSchema = z.object({
   targetFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   channel: z.enum(['SMS', 'KAKAO']),
   templateId: id.optional(),
-  // 이 필드가 생기기 전 job은 대체 발송 없이 만들어졌다.
+  // 하위 호환으로 저장만 한다. 발송 동작에는 쓰지 않는다.
   fallbackToSms: z.boolean().optional(),
   status: z.enum([
     'QUEUED',

@@ -1,4 +1,8 @@
+import type { KakaoOptions } from '../../src/sms/kakao-message';
 import type { OutgoingSms } from '../../src/sms/sms-sender.provider';
+
+// 문자 건과 카톡 건(`KakaoSenderProvider`)이 같은 send-many/detail로 나간다.
+export type SolapiOutgoing = OutgoingSms & { kakaoOptions?: KakaoOptions };
 
 export const isSolapiUrl = (input: Parameters<typeof fetch>[0]): boolean =>
   (typeof input === 'string'
@@ -16,11 +20,11 @@ export const isSolapiUrl = (input: Parameters<typeof fetch>[0]): boolean =>
 export async function solapiSendManyResponse(
   init: RequestInit | undefined,
   send: (
-    messages: OutgoingSms[],
+    messages: SolapiOutgoing[],
   ) => Promise<{ failedMessageList: { to: string }[] }>,
 ): Promise<Response> {
   if (typeof init?.body !== 'string') throw new Error('missing solapi body');
-  const body = JSON.parse(init.body) as { messages: OutgoingSms[] };
+  const body = JSON.parse(init.body) as { messages: SolapiOutgoing[] };
   const messages = body.messages.map(({ to, from, text, kakaoOptions }) => ({
     to,
     from,
