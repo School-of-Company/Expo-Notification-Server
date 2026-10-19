@@ -74,6 +74,39 @@ SSH agent는 `The agent has no identities.`라고 응답했지만 기존 파일 
 추측하지 않는다. host key 추가, strict checking 해제, 키/secret 탐색, 새 인증 구축은 하지 않았다.
 `.env` 원문, PM2 환경변수, SMS/DLQ payload, 전화번호, 본문은 읽지 않았다.
 
+## 저장소 측 준비 점검 도구 (2026-10-19 추가)
+
+2026-10-19 재조회: main에도 `deploy.yml`이 있고 Deploy workflow가 main push마다 성공했다
+(최근 `8f9e5b27eb940994acedc8c6ac07bd1d449909ab`, v0.6.0). 해당 SHA의 완료 마커는 `done-v2`,
+TTL 604800초다. workflow 성공은 서버에서 그 artifact가 PM2로 실행 중이라는 증거가 아니다.
+
+이후 배포부터 package에 `release.json`(전체 SHA, release 이름, run ID/attempt/URL, 빌드 시각)이
+포함된다. 서버 `deploy.sh`가 tarball 전체를 풀어 `dist`와 같은 위치에 두는지 담당자가 확인한다.
+
+PM2가 실행 중인 artifact 디렉터리에서 서비스와 같은 설정으로 읽기 전용 점검을 실행한다.
+설정이 ecosystem env로만 주어지면 같은 값을 환경에 넣고 실행한다. 출력에는 비밀값·전화번호가 없다.
+
+```sh
+cd <verified-artifact-directory>
+node --env-file=<서비스 .env> dist/ops/sms-readiness.cli.js > readiness.json; echo "exit=$?"
+```
+
+| 항목 | 판정 |
+| --- | --- |
+| `release.sha` | `release.json`의 전체 SHA. 없으면 `manual` |
+| `sms.doneMarkerTtl` | 실행 artifact에 컴파일된 `done-v2` / 604800초 |
+| `sms.traineeSender` | 설정 유무만. 승인 번호인지는 `manual` |
+| `kafka.topic.*` | 요청/DLQ/QR 완료 topic 존재와 partition 수. 없는 topic은 메타데이터를 요청하지 않아 자동 생성되지 않는다 |
+| `kafka.group` | `Stable`이고 member가 있어야 `ok` |
+| `kafka.committedOffsets` | 요청 topic 모든 partition에 commit이 있어야 `ok` (partition별 committed/logEnd/lag 기록) |
+| `redis.maxmemoryPolicy` | `noeviction`이어야 `ok` (eviction 시 완료 마커 유실로 중복 가능) |
+| `redis.persistence`, `kafka.acl` | 관측값만 기록하고 `manual` — 복구 절차, 실효 principal의 READ/WRITE 권한은 담당자 확인 |
+
+종료 코드: `fail`이 없으면 0, 있으면 1, 설정 로드 등 실행 실패는 2.
+Kafka는 topic 목록·메타데이터·group describe·offset fetch, Redis는 `INFO`만 사용한다.
+group join, offset 변경, 발행, key 조회를 하지 않는다. `ready: true`도 `manual` 항목 확인 전에는
+#27 완료가 아니다.
+
 ## DevOps에 요청할 읽기 전용 확인
 
 아래 명령은 이번 조사에서 서버 실행하지 않았다. 기존 승인된 접속 환경에서 담당자가 실행한다.
