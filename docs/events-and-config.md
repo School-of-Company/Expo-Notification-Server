@@ -152,11 +152,13 @@ processing(선점 5분) 이벤트는 건너뛰거나 DLQ로 보내지 않고 기
 `expo.applicant-count.updated` 이벤트는 발행하는 서비스가 없어 리포트가 나가지 않았다. 그래서 이벤트를 받지 않고 크론이 직접 조회하도록 바꿨다. 컨슈머와 `kafka.alarmGroupId`·`kafka.topics.expoApplicantCount` 설정은 제거했다. config-server에 남은 두 키는 무시된다.
 
 1. Expo `GET /internal/expo?page=&size=100`(Expo-Expo-Server#134): 삭제 중이 아니고 종료일이 오늘(KST) 이후인 박람회의 `expoId`·`title`을 `hasNext=false`까지 읽는다. 최대 10페이지(1,000개)이고 넘으면 그 회차를 실패로 본다.
-2. User `GET /internal/expos/{expoId}/participant-stats`: 박람회마다 `registeredParticipantCount`(등록한 고유 참가자 수, 동행자 포함)를 리포트의 "등록 인원"으로 쓴다.
+2. Application `GET /internal/expos/{expoId}/preregistrations/summary`(Expo-Application-Server#184, #68): `confirmedUniqueParticipants`(행사 전체 고유 확정 인원, 취소 제외)를 "등록 인원"으로, `waitingParticipants`를 "대기 인원"으로, `sessions[].confirmedParticipants`를 회차별 확정 인원으로 쓴다. 여러 회차에 신청한 사람도 전체에선 한 명이라 회차별 합은 전체와 다를 수 있다. 연결은 `promotionOffer.application`, 없으면 `promotion.application`을 재사용한다(`enabled`와 무관).
+3. Expo `GET /internal/expo/{expoId}/preregister-sessions`: 회차 `id`→`title`. 이름이 없는 회차는 `회차 {sessionId}`로 표시한다.
 
-- 매 정각(KST)에 위 값으로 Discord 웹훅 리포트를 보낸다. "어제 인원"은 매일 00:00:30(KST)에 같은 조회로 얻은 인원을 `alarm:yesterday:{expoId}`에 저장한 값이다(TTL 2일). 스냅샷이 없으면 0으로 본다.
+- 매 정각(KST)에 위 값으로 Discord 웹훅 리포트를 보낸다. "어제 인원"은 매일 00:00:30(KST)에 같은 조회로 얻은 확정 인원을 `alarm:yesterday:{expoId}`에 저장한 값이다(TTL 2일). 스냅샷이 없으면 0으로 본다. 증감은 취소로 줄면 음수로 표시한다.
+- 확정·대기·회차별 인원이 직전 발송(`alarm:last-sent:{expoId}`, TTL 30일)과 다른 박람회만 담는다. 바뀐 박람회가 없으면 보내지 않는다. 어제 인원·증감·날짜만 바뀐 경우는 보내지 않는다. 직전 값은 발송이 성공한 뒤에만 저장한다.
 - 조회나 발송이 실패하면 오류를 로그에 남기고 그 회차를 건너뛴다. 일부 박람회만 담은 리포트는 보내지 않는다. 자정 스냅샷이 실패하면 다음 날 리포트의 어제 인원이 이전 스냅샷 값이거나 0이 된다.
-- `expo`나 `user` 연결 설정, `discord.participantNumberUrl` 중 하나라도 없으면 리포트와 스냅샷을 생략한다.
+- `expo`나 Application 연결 설정, `discord.participantNumberUrl` 중 하나라도 없으면 리포트와 스냅샷을 생략한다. 리포트를 즉시 멈추려면 `discord.participantNumberUrl`을 비운다.
 - 크론은 Redis 락(`alarm:lock:*`, 55초)으로 인스턴스가 여러 개여도 한 번만 실행된다.
 
 ## HTTP
@@ -211,7 +213,7 @@ sms:                                   # 비밀 값은 Vault
   contactTraineeNumber: "…"            # 필수
   qrUrlTemplate: ""                     # 비어 있으면 일반 QR 문자 미발송
   traineeQrUrlTemplate: ""              # 비어 있으면 연수 QR 문자 미발송
-user:                                  # 이름 조회·등록 인원 리포트, 통째로 생략하면 역할 라벨이고 리포트 생략
+user:                                  # 이름 조회, 통째로 생략하면 역할 라벨
   baseUrl: "http://<USER_HOST>:8080"
   internalToken: "…"                    # Vault, 32자 이상
 expo:                                  # 등록 인원 리포트의 박람회 목록과 문자 #{행사명}, 생략하면 리포트 생략·기본 행사명
@@ -221,7 +223,7 @@ expo:                                  # 등록 인원 리포트의 박람회 �
 
 | 위치 | 키 |
 |---|---|
-| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회·등록 인원 조회), `expo.internalToken` (32자 이상, Expo의 내부 토큰 사본, 박람회 목록 조회) |
+| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회), `expo.internalToken` (32자 이상, Expo의 내부 토큰 사본, 박람회 목록·사전등록 회차 조회) |
 
 env 이름 조회 키는 `USER_SERVICE_URL`, `USER_SERVICE_INTERNAL_TOKEN`이다. 둘 다 없으면 fallback하고 일부만 설정되었거나 토큰/URL이 잘못되면 부팅을 실패시킨다. Expo 연결 env 키는 `EXPO_SERVICE_URL`, `EXPO_SERVICE_INTERNAL_TOKEN`이며 규칙은 같다. Attention HTTP 설정은 제거했다. User 이름 API만 사용하며 제거된 `sms-try` HTTP 호출은 복구하지 않는다.
 

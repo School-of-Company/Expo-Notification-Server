@@ -35,4 +35,25 @@ describe('ExpoStatStore', () => {
       172800,
     );
   });
+
+  it('직전 발송 값을 박람회 순서대로 읽고 30일 TTL로 저장한다', async () => {
+    redis.mget.mockResolvedValue(['[1]', null]);
+
+    await expect(store.findLastSent(['a', 'b'])).resolves.toEqual([
+      '[1]',
+      null,
+    ]);
+    expect(redis.mget).toHaveBeenCalledWith([
+      'alarm:last-sent:a',
+      'alarm:last-sent:b',
+    ]);
+
+    await store.saveLastSent([{ expoId: 'a', signature: '[2]' }]);
+    expect(redis.set).toHaveBeenCalledWith(
+      'alarm:last-sent:a',
+      '[2]',
+      'EX',
+      2592000,
+    );
+  });
 });
