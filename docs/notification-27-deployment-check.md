@@ -96,6 +96,7 @@ node --env-file=<서비스 .env> dist/ops/sms-readiness.cli.js > readiness.json;
 | `release.sha` | `release.json`의 전체 SHA. 없으면 `manual` |
 | `sms.doneMarkerTtl` | 실행 artifact에 컴파일된 `done-v2` / 604800초 |
 | `sms.traineeSender` | 설정 유무만. 승인 번호인지는 `manual` |
+| `sms.apiBaseUrl` | `SMS_API_BASE_URL` 미설정이면 `ok`. 설정돼 있으면 `fail`(호스트만 표시, 전체 URL은 출력하지 않음) — 공동 연결 검증 전용 값이라 운영에서는 제거한다 |
 | `kafka.topic.*` | 요청/DLQ/QR 완료 topic 존재와 partition 수. 없는 topic은 메타데이터를 요청하지 않아 자동 생성되지 않는다 |
 | `kafka.group` | `Stable`이고 member가 있어야 `ok` |
 | `kafka.committedOffsets` | 요청 topic 모든 partition에 commit이 있어야 `ok` (partition별 committed/logEnd/lag 기록) |

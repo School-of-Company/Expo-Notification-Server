@@ -95,6 +95,7 @@ describe('sms readiness', () => {
       doneTtlSeconds: 604800,
       eventMaxAttempts: 5,
       traineeSenderConfigured: true,
+      apiBaseUrlHost: null,
     });
     expect(result.kafka.requestedOffsets).toEqual([
       { partition: 0, committed: '10', logEnd: '12', lag: '2' },
@@ -125,6 +126,44 @@ describe('sms readiness', () => {
     ]) {
       expect(text).not.toContain(secret);
     }
+  });
+
+  it('SMS_API_BASE_URL이 없으면 sms.apiBaseUrl은 ok다', async () => {
+    const result = await report();
+
+    expect(status(result, 'sms.apiBaseUrl')).toBe('ok');
+    expect(result.sms.apiBaseUrlHost).toBeNull();
+  });
+
+  it('SMS_API_BASE_URL이 있으면 실패로 보고 ready를 막되 호스트만 출력한다', async () => {
+    const withUrl = createAppConfig({
+      sms: {
+        ...config.sms,
+        apiBaseUrl: 'http://user:pw@x.test:8080/secret/path?token=abc',
+      },
+    });
+
+    const result = evaluateReadiness(
+      await collectReadiness(withUrl, {
+        admin: fakeAdmin(),
+        redis: fakeRedis(),
+        release: { sha: SHA },
+      }),
+    );
+
+    expect(status(result, 'sms.apiBaseUrl')).toBe('fail');
+    expect(result.ready).toBe(false);
+    expect(result.sms.apiBaseUrlHost).toBe('x.test:8080');
+    const text = JSON.stringify(result);
+    expect(text).toContain('x.test');
+    for (const leaked of ['user', 'pw@', '/secret/path', 'token=abc']) {
+      expect(text).not.toContain(leaked);
+    }
+    expect(
+      result.checks
+        .filter((check) => check.status === 'fail')
+        .map((c) => c.name),
+    ).toEqual(['sms.apiBaseUrl']);
   });
 
   it('없는 토픽은 메타데이터를 요청하지 않는다(자동 생성 방지)', async () => {
