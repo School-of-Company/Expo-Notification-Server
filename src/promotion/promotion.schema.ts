@@ -72,6 +72,18 @@ export const promotionRecordSchema = z.object({
   messageId: z.string().optional(),
   providerCode: z.string().optional(),
   reason: z.string().optional(),
+  // #32 승인된 수동 재개 이력. 개인정보 없이 승인 근거 참조만 남긴다.
+  resumes: z
+    .array(
+      z.object({
+        at: z.iso.datetime(),
+        approvalRef: z.string(),
+        fromStatus: z.enum(['SENDING', 'UNKNOWN', 'OPERATIONS']),
+        fromAttemptId: z.uuid().optional(),
+        fromReason: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type PromotionRecord = z.infer<typeof promotionRecordSchema>;
 

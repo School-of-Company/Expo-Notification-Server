@@ -255,6 +255,9 @@ TRAINEE CUSTOM의 실제 Kafka/Redis 통합 테스트, 7일 완료 마커, DLQ �
 [Notification #20 계약](notification-20-contract.md)에 수신 JSON, 필요한 Application 검증 API,
 Solapi 접수/최종 전달 구분과 설정을 기록했다. Application 발행기/API는 아직 연결되지 않았으며
 `promotion.enabled`는 기본 비활성이다. 기존 CUSTOM 이벤트로 승급 안내를 대체하지 않는다.
+Redis 복구 보류(`PROMOTION_RECOVERY_HOLD`), 운영 점검 `GET /internal/promotion-notifications/ops/audit`,
+승인된 수동 재개, 공동 검증용 가짜 발송 서버(`SMS_API_BASE_URL`)는
+[Notification #32 runbook](notification-32-promotion-recovery.md)을 참고한다.
 
 대기 참여 제안(Application #144)은 승급 완료 안내와 다른 topic `application.promotion-offer.requested`·상태·결과 보고를 쓴다.
 [Notification #52 계약](notification-52-promotion-offer.md)에 흐름, 실제 공급자 접수 시각 보고, 결과 불명 처리와 설정을 기록했다.

@@ -13,7 +13,7 @@ export function solapiRequest(
   const signature = createHmac('sha256', config.sms.apiSecret)
     .update(date + salt)
     .digest('hex');
-  return fetch(`https://api.solapi.com${path}`, {
+  return fetch(`${config.sms.apiBaseUrl ?? 'https://api.solapi.com'}${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: {
       'Content-Type': 'application/json',

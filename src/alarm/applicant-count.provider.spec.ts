@@ -127,7 +127,11 @@ describe('ApplicantCountProvider', () => {
 
     expect(configured(withApplication())).toBe(true);
     expect(
-      configured(createAppConfig({ promotion: { ...promotionOffer } })),
+      configured(
+        createAppConfig({
+          promotion: { ...promotionOffer, recoveryHold: false },
+        }),
+      ),
     ).toBe(true);
     expect(configured(createAppConfig())).toBe(false);
     expect(configured(withApplication({ expo: undefined }))).toBe(false);

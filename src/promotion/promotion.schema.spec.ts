@@ -150,6 +150,7 @@ describe('promotion boundary contracts', () => {
         internalToken: 'o'.repeat(32),
         topic: 'promotion.test',
         groupId: 'promotion.test',
+        recoveryHold: false,
       },
     });
     const provider = new PromotionApplicationProvider(config);

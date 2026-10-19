@@ -17,7 +17,13 @@ export class PromotionScheduler {
 
   @Interval(5000)
   async retry(): Promise<void> {
-    if (!this.config.promotion?.enabled || this.running) return;
+    // 복구 보류 중에는 due backlog를 돌지 않는다. ACCEPTED 결과 조회는 운영 대조 API로 한다.
+    if (
+      !this.config.promotion?.enabled ||
+      this.config.promotion.recoveryHold ||
+      this.running
+    )
+      return;
     this.running = true;
     try {
       for (const id of await this.store.due()) {

@@ -13,6 +13,9 @@ import { PromotionStore } from './promotion.store';
 import { PromotionRetryError } from './promotion.schema';
 import type { PromotionEvent, PromotionRecord } from './promotion.schema';
 
+export type PromotionResumeResult =
+  'RESUMED' | 'NOT_FOUND' | 'NOT_RESUMABLE' | 'BUSY';
+
 @Injectable()
 export class PromotionService {
   private readonly logger = new Logger(PromotionService.name);
@@ -28,7 +31,61 @@ export class PromotionService {
 
   async handle(event: PromotionEvent): Promise<void> {
     await this.store.enqueue(event);
+    // 복구 보류 중에는 수신 기록만 남기고 Kafka ACK한다. 발송은 공급자 대조 뒤 보류를 풀 때 스케줄러가 한다.
+    if (this.held) return;
     await this.process(event.eventId);
+  }
+
+  get held(): boolean {
+    return this.config.promotion?.recoveryHold === true;
+  }
+
+  // #32 messageId 없는 UNKNOWN/SENDING과 OPERATIONS만 승인 근거와 함께 PENDING으로 되돌린다.
+  // 목록에 없음만으로 미접수를 판정하지 않으므로, 근거 확인은 승인 담당자 책임이고 여기서는 이력만 남긴다.
+  async resume(
+    id: string,
+    approvalRef: string,
+  ): Promise<PromotionResumeResult> {
+    const token = await this.store.claim(id);
+    if (!token) return 'BUSY';
+    try {
+      const record = await this.store.get(id);
+      if (!record) return 'NOT_FOUND';
+      const resumable =
+        record.status === 'OPERATIONS' ||
+        ((record.status === 'UNKNOWN' || record.status === 'SENDING') &&
+          !record.messageId);
+      if (!resumable) return 'NOT_RESUMABLE';
+      const fromStatus = record.status as 'OPERATIONS' | 'UNKNOWN' | 'SENDING';
+      await this.store.save(
+        {
+          event: record.event,
+          status: 'PENDING',
+          failures: 0,
+          reason: 'MANUAL_RESUME',
+          resumes: [
+            ...(record.resumes ?? []),
+            {
+              at: new Date().toISOString(),
+              approvalRef,
+              fromStatus,
+              fromAttemptId: record.attemptId,
+              fromReason: record.reason,
+            },
+          ],
+        },
+        token,
+      );
+      this.logger.warn({
+        message: '승급 안내 수동 재개',
+        eventId: id,
+        fromStatus,
+        held: this.held,
+      });
+      return 'RESUMED';
+    } finally {
+      await this.store.release(id, token);
+    }
   }
 
   async process(id: string, messageId?: string): Promise<void> {
@@ -58,6 +115,8 @@ export class PromotionService {
         return;
       }
       if (record.status !== 'PENDING') return;
+      // 대조 전 backlog 재처리 금지. 결과 조회(위)는 발송하지 않으므로 보류 중에도 허용한다.
+      if (this.held) return;
       let check: Awaited<ReturnType<PromotionApplicationProvider['check']>>;
       try {
         check = await this.application.check(record.event);
