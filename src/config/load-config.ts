@@ -77,6 +77,10 @@ function configFromEnv(env: Env): Record<string, unknown> {
       authCodeTtlSeconds: env.SMS_AUTH_CODE_TTL_SECONDS,
       authMaxSendCount: env.SMS_AUTH_MAX_SEND_COUNT,
       authMaxSendCountPerHour: env.SMS_AUTH_MAX_SEND_COUNT_PER_HOUR,
+      authMaxInternalSendCountPerHour:
+        env.SMS_AUTH_MAX_INTERNAL_SEND_COUNT_PER_HOUR,
+      authInternalToken: env.SMS_AUTH_INTERNAL_TOKEN,
+      authCodeLength: env.SMS_AUTH_CODE_LENGTH,
       eventMaxAttempts: env.SMS_EVENT_MAX_ATTEMPTS,
       expoName: env.SMS_EXPO_NAME,
       contactStandardNumber: env.SMS_CONTACT_STANDARD_NUMBER,

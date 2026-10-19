@@ -21,9 +21,9 @@ export class SendCodeDto extends PhoneNumberDto {
 
 export class VerifyCodeDto extends PhoneNumberDto {
   @ApiProperty({
-    description: '문자로 받은 네 자리 인증번호 (합성 예시)',
+    description: '문자로 받은 인증번호, 4자리 또는 6자리 (합성 예시)',
     example: '0000',
-    pattern: '^\\d{4}$',
+    pattern: '^(\\d{4}|\\d{6})$',
   })
   code!: string;
 }

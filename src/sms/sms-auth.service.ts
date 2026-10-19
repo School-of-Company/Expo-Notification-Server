@@ -26,9 +26,16 @@ export class SmsAuthService {
     private readonly kakao: KakaoSenderProvider,
   ) {}
 
-  async sendCode(phoneNumber: string): Promise<void> {
-    const { authCodeTtlSeconds, authMaxSendCount, fromStandardNumber } =
-      this.config.sms;
+  /** internal: 내부 토큰이 맞는 요청(User 참가자 인증). 공개 요청이 시간당 상한을 다 써도 막히지 않는다. */
+  async sendCode(phoneNumber: string, internal = false): Promise<void> {
+    const {
+      authCodeTtlSeconds,
+      authMaxSendCount,
+      authMaxSendCountPerHour,
+      authMaxInternalSendCountPerHour,
+      authCodeLength,
+      fromStandardNumber,
+    } = this.config.sms;
 
     const { count: sendCount, window } = await this.store.increaseSendCount(
       phoneNumber,
@@ -42,15 +49,23 @@ export class SmsAuthService {
     }
 
     const hourBucket = new Date().toISOString().slice(0, 13);
-    const globalCount = await this.store.increaseGlobalSendCount(hourBucket);
-    if (globalCount > this.config.sms.authMaxSendCountPerHour) {
+    const globalCount = await this.store.increaseGlobalSendCount(
+      internal ? `internal:${hourBucket}` : hourBucket,
+    );
+    const hourlyLimit = internal
+      ? authMaxInternalSendCountPerHour
+      : authMaxSendCountPerHour;
+    if (globalCount > hourlyLimit) {
       throw new HttpException(
         '인증번호 요청이 많습니다. 잠시 후 다시 시도해주세요.',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    const code = String(randomInt(0, 10_000)).padStart(4, '0');
+    const code = String(randomInt(0, 10 ** authCodeLength)).padStart(
+      authCodeLength,
+      '0',
+    );
     // 카운트 후 저장 전에 창이 만료됐다. 새 창을 몰래 열면 번호별 상한을 건너뛰므로 실패시킨다.
     if (!(await this.store.saveCode(phoneNumber, window, code))) {
       throw new HttpException(
