@@ -12,6 +12,10 @@ const baseEnv = {
   SMS_FROM_TRAINEE_NUMBER: '0623804587',
   SMS_CONTACT_STANDARD_NUMBER: '062-380-4504',
   SMS_CONTACT_TRAINEE_NUMBER: '062-380-4587',
+  SMS_QR_URL_TEMPLATE:
+    'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
+  SMS_TRAINEE_QR_URL_TEMPLATE:
+    'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}',
   USER_SERVICE_URL: 'http://user:8080',
   USER_SERVICE_INTERNAL_TOKEN: 'a'.repeat(32),
 };
@@ -306,31 +310,43 @@ describe('loadConfig', () => {
       jest.fn(),
     );
     expect(config.user).toBeUndefined();
-    expect(config.sms.qrUrlTemplate).toBeUndefined();
   });
 
-  it('QR 템플릿 env를 읽고 config 서버의 빈 값은 발송을 끈다', async () => {
-    const template =
-      'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}';
-    const config = await loadConfig(
-      {
-        ...baseEnv,
-        SMS_QR_URL_TEMPLATE: template,
-        SMS_TRAINEE_QR_URL_TEMPLATE: 'trainee',
-      },
-      jest.fn(),
+  it('QR 템플릿 env를 읽는다', async () => {
+    const config = await loadConfig(baseEnv, jest.fn());
+    expect(config.sms.qrUrlTemplate).toBe(baseEnv.SMS_QR_URL_TEMPLATE);
+    expect(config.sms.traineeQrUrlTemplate).toBe(
+      baseEnv.SMS_TRAINEE_QR_URL_TEMPLATE,
     );
-    expect(config.sms.qrUrlTemplate).toBe(template);
-    expect(config.sms.traineeQrUrlTemplate).toBe('trainee');
-    const disabled = await loadConfig(
-      {
-        ...baseEnv,
-        SMS_QR_URL_TEMPLATE: template,
-        CONFIG_SERVER_URL: 'http://config',
-      },
-      jest.fn().mockResolvedValue(jsonResponse({ sms: { qrUrlTemplate: '' } })),
-    );
-    expect(disabled.sms.qrUrlTemplate).toBe('');
+  });
+
+  // 비어 있으면 등록 이벤트를 커밋만 하고 QR 문자를 영구히 못 보낸다(#81). 부팅에서 막는다.
+  it.each([
+    ['일반 누락', { SMS_QR_URL_TEMPLATE: undefined }, /sms\.qrUrlTemplate/],
+    ['일반 공백', { SMS_QR_URL_TEMPLATE: '   ' }, /sms\.qrUrlTemplate/],
+    [
+      '연수 빈 값',
+      { SMS_TRAINEE_QR_URL_TEMPLATE: '' },
+      /sms\.traineeQrUrlTemplate/,
+    ],
+  ])(
+    'QR 템플릿이 없거나 비면 부팅을 실패시킨다: %s',
+    async (_, override, key) => {
+      await expect(
+        loadConfig({ ...baseEnv, ...override }, jest.fn()),
+      ).rejects.toThrow(key);
+    },
+  );
+
+  it('config 서버의 빈 QR 템플릿도 부팅을 실패시킨다', async () => {
+    await expect(
+      loadConfig(
+        { ...baseEnv, CONFIG_SERVER_URL: 'http://config' },
+        jest
+          .fn()
+          .mockResolvedValue(jsonResponse({ sms: { qrUrlTemplate: '' } })),
+      ),
+    ).rejects.toThrow(/sms\.qrUrlTemplate/);
   });
 
   it.each([
