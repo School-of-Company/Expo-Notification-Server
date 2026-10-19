@@ -39,13 +39,6 @@ export class QrSmsService {
     const template = standard
       ? this.config.sms.qrUrlTemplate
       : this.config.sms.traineeQrUrlTemplate;
-    if (!template?.trim()) {
-      this.logger.warn(
-        `QR 문자 템플릿 미설정으로 미발송: eventId=${event.eventId}`,
-      );
-      return;
-    }
-
     const result = await this.guard.once(event.eventId, async (beginSend) => {
       const links = buildQrPageLinks(template, event);
       const names = standard

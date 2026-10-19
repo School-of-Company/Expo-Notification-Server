@@ -30,7 +30,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
   `https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}`
 - 두 형식은 다르므로 연수자에 STANDARD 템플릿을 대신 사용하지 않는다. 연수자는 Client의 기존 `{traineeId,phoneNumber}` QR를 유지하며 전화번호가 URL에 남는다. 일행 페이지/token 발급이나 일반 code 생성은 하지 않는다.
 - 치환 값은 URI 인코딩한다. HTTPS, 정확한 `/qr` 경로와 쿼리 이름/값/개수, 필수 placeholder를 검증한다. ID는 positive safe integer, STANDARD code는 영문·숫자·`_`·`-` 22자다. 자격증명/fragment/추가 쿼리를 허용하지 않는다.
-- 해당 유형의 템플릿이 없거나 비어 있으면 **선점·발송·완료 표시·완료 이벤트 발행을 모두 하지 않는다**. Kafka 처리는 정상 종료되므로 활성화 뒤 자동 재전달되지 않는다. 운영자는 필요한 이벤트를 선별해 재생해야 한다.
+- 두 템플릿은 필수다. 없거나 비어 있으면 부팅을 실패시킨다. 미설정 상태로 이벤트를 소비해 커밋하면 그 등록의 QR 문자가 영구히 유실되기 때문이다.
 - 비어 있지 않은 잘못된 템플릿, STANDARD의 누락된 participants/code, 한 통 길이 상한 초과는 발송 없이 실패하며 선점을 해제한다. 기존 최대 재시도 후 DLQ 정책을 사용한다. 성공을 거짓 기록하지 않는다.
 - code 형식 오류/중복 ID/빈 목록/6명 이상/잘못된 ID 등 스키마 오류는 기존 소비 정책대로 로그 후 건너뛰며 미발송한다. 원본을 복구하려면 운영 원본 이벤트 보관이 필요하다.
 - 구버전 STANDARD 이벤트에 code/목록이 없으면 번호로 QR를 생성하거나 code를 추측하지 않는다. 현재 User resolve API는 ID만 반환하고 names API도 code를 반환하지 않는다. User에서 현재 저장된 QR로 새 등록/재발송 이벤트를 생산하거나, 원본 outbox 목록이 있는 경우 공급자가 복구한 이벤트를 재생해야 한다. 구버전의 `done-v2`는 이미 발송한 문자이므로 완료 발행만 이어가고 `done`은 모두 건너뛴다.
@@ -211,8 +211,8 @@ sms:                                   # 비밀 값은 Vault
   authMaxVerifyAttemptCount: 5
   contactStandardNumber: "…"           # 필수, QR 문자의 (문의) 줄
   contactTraineeNumber: "…"            # 필수
-  qrUrlTemplate: ""                     # 비어 있으면 일반 QR 문자 미발송
-  traineeQrUrlTemplate: ""              # 비어 있으면 연수 QR 문자 미발송
+  qrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&code={code}"   # 필수
+  traineeQrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}"   # 필수
 user:                                  # 이름 조회, 통째로 생략하면 역할 라벨
   baseUrl: "http://<USER_HOST>:8080"
   internalToken: "…"                    # Vault, 32자 이상

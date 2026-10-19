@@ -270,18 +270,6 @@ describe('QrSmsService', () => {
     expect(publish).toHaveBeenCalledTimes(1);
   });
 
-  it.each([undefined, '', '   '])(
-    '템플릿 %s는 선점/발송/발행 없이 끝낸다',
-    async (template) => {
-      config.sms.qrUrlTemplate = template;
-      await service.handle(standard);
-      expect(send).not.toHaveBeenCalled();
-      expect(fetchSpy).not.toHaveBeenCalled();
-      expect(publish).not.toHaveBeenCalled();
-      expect(await redis.get('sms:event:e1')).toBeNull();
-    },
-  );
-
   it.each([
     { ...standard, participants: undefined },
     { ...standard, participants: [{ id: 42 }] },
@@ -323,13 +311,6 @@ describe('QrSmsService', () => {
     expect(text()).not.toContain('code=');
     expect(send.mock.calls[0]?.[0][0]?.from).toBe(config.sms.fromTraineeNumber);
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(publish).not.toHaveBeenCalled();
-  });
-
-  it('TRAINEE에 STANDARD 템플릿을 대신 쓰지 않는다', async () => {
-    config.sms.traineeQrUrlTemplate = undefined;
-    await service.handle({ ...standard, participationType: 'TRAINEE' });
-    expect(send).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
   });
 

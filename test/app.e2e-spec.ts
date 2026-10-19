@@ -433,17 +433,6 @@ describe('Notification server (e2e)', () => {
       expect(sentEvents()).toHaveLength(1);
     });
 
-    it('템플릿 미설정은 소비를 끝내되 문자/완료/발행 기록이 없다', async () => {
-      config.sms.qrUrlTemplate = '';
-      await emit(registeredGroup, registered);
-      expect(solapiSend).not.toHaveBeenCalled();
-      expect(sentEvents()).toHaveLength(0);
-      expect(fetchSpy).not.toHaveBeenCalled();
-      expect(
-        await app.get<FakeRedis>(REDIS_CLIENT).get('sms:event:reg-1'),
-      ).toBeNull();
-    });
-
     it('누락된 STANDARD code는 재시도 후 DLQ로 이동하고 성공을 기록하지 않는다', async () => {
       const unsupported = { ...registered, participants: [{ id: 42 }] };
       for (let i = 1; i < config.sms.eventMaxAttempts; i += 1) {

@@ -104,8 +104,9 @@ const baseAppConfigSchema = z.object({
     // 카카오 K2 템플릿은 문의 줄을 뺄 수 없어 필수다.
     contactStandardNumber: z.string().min(1),
     contactTraineeNumber: z.string().min(1),
-    qrUrlTemplate: z.string().trim().optional(),
-    traineeQrUrlTemplate: z.string().trim().optional(),
+    // 비어 있으면 등록 이벤트를 커밋만 하고 QR 문자를 영구히 못 보내므로 부팅에서 막는다.
+    qrUrlTemplate: z.string().trim().min(1),
+    traineeQrUrlTemplate: z.string().trim().min(1),
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
     // 공동 연결 검증(#32)에서 가짜 SMS 발송 서버를 가리킬 때만 쓴다. 없으면 실제 Solapi다.
     apiBaseUrl: z
