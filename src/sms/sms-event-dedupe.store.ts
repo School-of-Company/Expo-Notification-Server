@@ -4,7 +4,9 @@ import { REDIS_CLIENT } from '../redis/redis.constants';
 
 const LEASE_SECONDS = 60 * 5;
 // DLQ 재처리가 사람 손을 거쳐 며칠 뒤에 일어날 수 있어, 완료 마커는 그보다 오래 둔다.
-const DONE_SECONDS = 60 * 60 * 24 * 7;
+export const SMS_EVENT_DONE_TTL_SECONDS = 60 * 60 * 24 * 7;
+export const SMS_EVENT_DONE_MARKER = 'done-v2';
+const DONE_SECONDS = SMS_EVENT_DONE_TTL_SECONDS;
 const key = (eventId: string) => `sms:event:${eventId}`;
 const publishedKey = (eventId: string) => `sms:event-published:${eventId}`;
 
@@ -33,7 +35,7 @@ export class SmsEventDedupeStore {
         switch (state) {
           case 'done':
             return 'legacy-done';
-          case 'done-v2':
+          case SMS_EVENT_DONE_MARKER:
             return 'done';
           case 'sending':
           case 'unknown':
@@ -65,7 +67,12 @@ export class SmsEventDedupeStore {
   }
 
   async complete(eventId: string): Promise<void> {
-    await this.redis.set(key(eventId), 'done-v2', 'EX', DONE_SECONDS);
+    await this.redis.set(
+      key(eventId),
+      SMS_EVENT_DONE_MARKER,
+      'EX',
+      DONE_SECONDS,
+    );
   }
 
   async increaseFailureCount(eventId: string): Promise<number> {
