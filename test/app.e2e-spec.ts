@@ -16,9 +16,17 @@ import {
 } from './fixtures/solapi-fetch.fixture';
 import { FakeRedis } from './fixtures/fake-redis';
 
-const config = createAppConfig();
+const config = createAppConfig({
+  promotionOffer: {
+    enabled: false,
+    application: { baseUrl: 'http://app.test', internalToken: 'c'.repeat(32) },
+    internalToken: 'd'.repeat(32),
+    topic: 'application.promotion-offer.requested',
+    groupId: 'expo-notification-server.promotion-offer',
+  },
+});
 
-let registeredParticipantCount = 30;
+let confirmedUniqueParticipants = 30;
 const jsonResponse = (body: unknown) =>
   ({ ok: true, status: 200, json: () => Promise.resolve(body) }) as Response;
 const internalResponse = (url: string): Response => {
@@ -29,8 +37,17 @@ const internalResponse = (url: string): Response => {
       content: [{ expoId: 'expo-1', title: '광주 박람회' }],
       hasNext: false,
     });
-  if (url.endsWith('/internal/expos/expo-1/participant-stats'))
-    return jsonResponse({ expoId: 'expo-1', registeredParticipantCount });
+  if (url.endsWith('/internal/expo/expo-1/preregister-sessions'))
+    return jsonResponse([{ id: 1, title: '10/31 오전' }]);
+  if (url.endsWith('/internal/expos/expo-1/preregistrations/summary'))
+    return jsonResponse({
+      expoId: 'expo-1',
+      confirmedUniqueParticipants,
+      waitingParticipants: 0,
+      sessions: [
+        { sessionId: 1, confirmedParticipants: confirmedUniqueParticipants },
+      ],
+    });
   return { ok: true, status: 204 } as Response;
 };
 
@@ -556,8 +573,8 @@ describe('Notification server (e2e)', () => {
   });
 
   describe('등록 인원 알람', () => {
-    it('이벤트 없이 내부 API로 조회한 인원을 Discord에 보내고, 자정 스냅샷 후엔 증가분만 보인다 (#54)', async () => {
-      registeredParticipantCount = 30;
+    it('확정 인원을 Discord에 보내고, 변화가 없으면 보내지 않으며, 자정 스냅샷 후엔 증감만 보인다 (#54, #68)', async () => {
+      confirmedUniqueParticipants = 30;
       const alarm = app.get(AlarmReportService);
       const discordCalls = () =>
         (fetchSpy.mock.calls as Parameters<typeof fetch>[]).filter(
@@ -568,20 +585,27 @@ describe('Notification server (e2e)', () => {
 
       expect(discordCalls()).toHaveLength(1);
       const fields = embedFields(discordCalls()[0]);
-      expect(fields[0].value).toBe('광주 박람회');
-      expect(fields[1].value).toBe('0');
-      expect(fields[2].value).toBe('30');
-      expect(fields[3].value).toBe('+30');
+      expect(fields.map((field) => field.value)).toEqual([
+        '광주 박람회',
+        '0',
+        '30',
+        '+30',
+        '0',
+        '30',
+      ]);
+
+      fetchSpy.mockClear();
+      await alarm.sendParticipantNumberReport();
+      expect(discordCalls()).toHaveLength(0);
 
       await alarm.saveYesterdayApplicantCount();
-      registeredParticipantCount = 33;
-      fetchSpy.mockClear();
+      confirmedUniqueParticipants = 27;
       await alarm.sendParticipantNumberReport();
 
       const next = embedFields(discordCalls()[0]);
       expect(next[1].value).toBe('30');
-      expect(next[2].value).toBe('33');
-      expect(next[3].value).toBe('+3');
+      expect(next[2].value).toBe('27');
+      expect(next[3].value).toBe('-3');
     });
   });
 
