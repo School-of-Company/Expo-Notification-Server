@@ -30,6 +30,10 @@ export class PromotionConsumer
   async onApplicationBootstrap(): Promise<void> {
     const config = this.config.promotion;
     if (!config?.enabled) return;
+    if (config.recoveryHold)
+      this.logger.warn({
+        message: '승급 안내 복구 보류 중: 수신 기록만 하고 발송하지 않음',
+      });
     const consumer = this.kafka.consumer({ groupId: config.groupId });
     this.consumer = consumer;
     await consumer.connect();

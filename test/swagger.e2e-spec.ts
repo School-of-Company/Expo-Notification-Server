@@ -106,8 +106,10 @@ describe.each([
             '/internal/admin-group-messages/jobs/{jobId}/retries',
             '/internal/admin-group-messages/previews',
             '/internal/admin-group-messages/previews/{previewId}/jobs',
+            '/internal/promotion-notifications/ops/audit',
             '/internal/promotion-notifications/{eventId}',
             '/internal/promotion-notifications/{eventId}/reconciliation',
+            '/internal/promotion-notifications/{eventId}/resumption',
             '/internal/promotion-offer-notifications/{eventId}',
             '/internal/promotion-offer-notifications/{eventId}/reconciliation',
           ]

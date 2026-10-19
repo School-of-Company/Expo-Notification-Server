@@ -169,3 +169,111 @@ describe('PromotionService 승급 안내(K3)', () => {
     },
   );
 });
+
+describe('PromotionService 복구 보류와 수동 재개(#32)', () => {
+  const base: PromotionRecord = { event, status: 'PENDING', failures: 0 };
+  const setup = (record: PromotionRecord | null, recoveryHold = false) => {
+    const config = createAppConfig({
+      promotion: {
+        enabled: true,
+        application: {
+          baseUrl: 'http://application.test',
+          internalToken: 'a'.repeat(32),
+        },
+        internalToken: 'o'.repeat(32),
+        topic: 'promotion.test',
+        groupId: 'promotion.test',
+        recoveryHold,
+      },
+    });
+    const store = {
+      enqueue: jest.fn().mockResolvedValue(undefined),
+      claim: jest.fn().mockResolvedValue('token'),
+      get: jest.fn().mockResolvedValue(record),
+      save: jest
+        .fn<Promise<void>, [PromotionRecord, string]>()
+        .mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+    };
+    const check = jest.fn().mockResolvedValue(check2);
+    const send = jest.fn();
+    const service = new PromotionService(
+      config,
+      store as unknown as PromotionStore,
+      { check } as unknown as PromotionApplicationProvider,
+      { send } as unknown as PromotionSolapiProvider,
+      { titleOf: jest.fn() } as unknown as ExpoNameProvider,
+      new KakaoSenderProvider(config),
+    );
+    return { service, store, check, send };
+  };
+  const check2 = check;
+
+  it('보류 중에는 수신 기록만 하고 조회·발송하지 않는다', async () => {
+    const { service, store, check, send } = setup(base, true);
+
+    await service.handle(event);
+    await service.process(event.eventId);
+
+    expect(store.enqueue).toHaveBeenCalledWith(event);
+    expect(check).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(store.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ ...base, status: 'UNKNOWN' as const, attemptId: event.applicationId }],
+    [{ ...base, status: 'SENDING' as const }],
+    [{ ...base, status: 'OPERATIONS' as const, failures: 5 }],
+  ])(
+    '%o는 승인 근거와 함께 PENDING으로 재개하고 이력을 남긴다',
+    async (record) => {
+      const { service, store, send } = setup(record);
+
+      await expect(service.resume(event.eventId, 'OPS-1')).resolves.toBe(
+        'RESUMED',
+      );
+
+      const saved = store.save.mock.calls[0]?.[0];
+      expect(saved).toMatchObject({
+        status: 'PENDING',
+        failures: 0,
+        reason: 'MANUAL_RESUME',
+        resumes: [
+          {
+            approvalRef: 'OPS-1',
+            fromStatus: record.status,
+            fromAttemptId: record.attemptId,
+          },
+        ],
+      });
+      expect(saved?.attemptId).toBeUndefined();
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [{ ...base, status: 'UNKNOWN' as const, messageId: 'm-1' }],
+    [{ ...base, status: 'ACCEPTED' as const, messageId: 'm-1' }],
+    [{ ...base, status: 'DELIVERED' as const }],
+    [base],
+  ])('%o는 재개하지 않는다', async (record) => {
+    const { service, store } = setup(record);
+
+    await expect(service.resume(event.eventId, 'OPS-1')).resolves.toBe(
+      'NOT_RESUMABLE',
+    );
+    expect(store.save).not.toHaveBeenCalled();
+  });
+
+  it('선점 중이면 BUSY, 기록이 없으면 NOT_FOUND', async () => {
+    const busy = setup(base);
+    busy.store.claim.mockResolvedValue(null);
+    await expect(busy.service.resume(event.eventId, 'OPS-1')).resolves.toBe(
+      'BUSY',
+    );
+    await expect(
+      setup(null).service.resume(event.eventId, 'OPS-1'),
+    ).resolves.toBe('NOT_FOUND');
+  });
+});
