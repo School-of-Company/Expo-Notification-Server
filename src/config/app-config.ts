@@ -107,6 +107,11 @@ const baseAppConfigSchema = z.object({
     qrUrlTemplate: z.string().trim().optional(),
     traineeQrUrlTemplate: z.string().trim().optional(),
     authMaxVerifyAttemptCount: z.coerce.number().int().positive().default(5),
+    // 공동 연결 검증(#32)에서 가짜 SMS 발송 서버를 가리킬 때만 쓴다. 없으면 실제 Solapi다.
+    apiBaseUrl: z
+      .url()
+      .transform((url) => url.replace(/\/+$/, ''))
+      .optional(),
   }),
   // 자동 발송 알림톡 templateId. 키가 없는 메시지는 문자로만 나간다. 문구는 sms-message.templates.ts 상수에 있다.
   kakao: z
@@ -140,6 +145,13 @@ const baseAppConfigSchema = z.object({
       internalToken: z.string().min(32),
       topic: z.string().min(1).default('application.program-session.promoted'),
       groupId: z.string().min(1).default('expo-notification-server.promotion'),
+      // #32 Redis 복구 후 공급자 이력 대조 전에는 새 발송을 막는다. Kafka 수신 기록과 결과 조회·대조는 계속한다.
+      recoveryHold: z
+        .union([
+          z.boolean(),
+          z.enum(['true', 'false']).transform((value) => value === 'true'),
+        ])
+        .default(false),
     })
     .optional(),
   // #144 participation offers: a separate topic and contract from the completed-promotion notice above.

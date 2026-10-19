@@ -1,6 +1,6 @@
 {
   "name": "expo-notification-server",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "",
   "author": "",
   "private": true,
@@ -21,6 +21,7 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:integration": "jest --config ./test/integration/jest.json --runInBand",
+    "ops:sms-readiness": "node dist/ops/sms-readiness.cli.js",
     "start:group-message-harness": "ts-node test/harness/admin-group-message-harness.ts"
   },
   "dependencies": {

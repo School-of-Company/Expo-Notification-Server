@@ -84,6 +84,7 @@ function configFromEnv(env: Env): Record<string, unknown> {
       qrUrlTemplate: env.SMS_QR_URL_TEMPLATE,
       traineeQrUrlTemplate: env.SMS_TRAINEE_QR_URL_TEMPLATE,
       authMaxVerifyAttemptCount: env.SMS_AUTH_MAX_VERIFY_ATTEMPT_COUNT,
+      apiBaseUrl: env.SMS_API_BASE_URL,
     }),
     ...((env.USER_SERVICE_URL || env.USER_SERVICE_INTERNAL_TOKEN) && {
       user: pickDefined({
@@ -105,6 +106,7 @@ function configFromEnv(env: Env): Record<string, unknown> {
           internalToken: env.PROMOTION_INTERNAL_TOKEN,
           topic: env.KAFKA_PROMOTION_TOPIC,
           groupId: env.KAFKA_PROMOTION_GROUP_ID,
+          recoveryHold: env.PROMOTION_RECOVERY_HOLD,
         }),
         application: pickDefined({
           baseUrl: env.PROMOTION_APPLICATION_URL,

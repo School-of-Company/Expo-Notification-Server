@@ -92,6 +92,7 @@ export class PromotionRuntime {
         internalToken: 'o'.repeat(32),
         topic: this.topic,
         groupId: this.groupId,
+        recoveryHold: false,
       },
     });
     const module = await Test.createTestingModule({

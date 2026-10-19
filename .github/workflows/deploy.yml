@@ -43,8 +43,11 @@ jobs:
           pnpm run build
           pnpm prune --prod
 
+      # release.json 은 운영 점검(dist/ops/sms-readiness.cli.js)이 실행 중인 artifact 의 전체 SHA 를 확인하는 근거다 (#27)
       - name: Package
-        run: tar czf release.tar.gz dist node_modules package.json
+        run: |
+          node -e 'const e = process.env; require("fs").writeFileSync("release.json", JSON.stringify({ sha: e.GITHUB_SHA, release: e.GITHUB_SHA.slice(0, 12) + "-" + e.GITHUB_RUN_ATTEMPT, runId: e.GITHUB_RUN_ID, runAttempt: e.GITHUB_RUN_ATTEMPT, runUrl: e.GITHUB_SERVER_URL + "/" + e.GITHUB_REPOSITORY + "/actions/runs/" + e.GITHUB_RUN_ID, builtAt: new Date().toISOString() }, null, 2) + "\n")'
+          tar czf release.tar.gz dist node_modules package.json release.json
 
       - name: Configure SSH
         env:
