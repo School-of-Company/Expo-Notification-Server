@@ -37,6 +37,8 @@ export type ReadinessSnapshot = {
     doneTtlSeconds: number;
     eventMaxAttempts: number;
     traineeSenderConfigured: boolean;
+    /** sms.apiBaseUrl이 설정됐을 때 호스트만. 전체 URL(경로·자격 증명)은 담지 않는다. */
+    apiBaseUrlHost: string | null;
   };
   kafka: {
     groupId: string;
@@ -139,6 +141,14 @@ export function parseRedisInfo(text: string): Record<string, string> {
     }
   }
   return fields;
+}
+
+function hostOnly(url: string): string {
+  try {
+    return new URL(url).host || '(호스트 없음)';
+  } catch {
+    return '(해석 불가)';
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -260,6 +270,9 @@ export async function collectReadiness(
       doneTtlSeconds: SMS_EVENT_DONE_TTL_SECONDS,
       eventMaxAttempts: config.sms.eventMaxAttempts,
       traineeSenderConfigured: config.sms.fromTraineeNumber.trim().length > 0,
+      apiBaseUrlHost: config.sms.apiBaseUrl
+        ? hostOnly(config.sms.apiBaseUrl)
+        : null,
     },
     kafka,
     redis,
@@ -338,6 +351,21 @@ export function evaluateReadiness(
           name: 'sms.traineeSender',
           status: 'fail',
           detail: '연수 발신번호 미설정',
+        },
+  );
+
+  // 이 도구는 운영 artifact에서 서비스와 같은 설정으로 돌리므로, 값이 있으면 운영에 남은 것으로 보고 fail로 본다.
+  checks.push(
+    sms.apiBaseUrlHost === null
+      ? {
+          name: 'sms.apiBaseUrl',
+          status: 'ok',
+          detail: '미설정 — 실제 Solapi로 발송',
+        }
+      : {
+          name: 'sms.apiBaseUrl',
+          status: 'fail',
+          detail: `SMS_API_BASE_URL 설정됨(host=${sms.apiBaseUrlHost}) — 모든 Solapi 호출과 인증 헤더가 그 주소로 간다. 공동 연결 검증 전용이므로 운영에서는 제거한다`,
         },
   );
 
