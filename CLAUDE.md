@@ -6,7 +6,7 @@
 It owns two things, fed by Kafka events and internal APIs of the other services:
 
 - **sms** — sends SMS through Solapi (CoolSMS) from Kafka events: User's registration event → individual Client /qr links in one SMS (optional User name lookup, then publishes `notification.qr-sms.sent` for the representative), plus generic `notification.sms.requested` (failures past `sms.eventMaxAttempts` go to a DLQ topic), plus the HTTP phone-verification code flow (`POST /sms`, `POST /sms/verify`) with per-number and hourly global send caps
-- **alarm** — hourly (KST) reads active expos from Expo's internal API and each expo's registered count from User's internal API, reports them to Discord, and snapshots "yesterday" counts in Redis at 00:00:30
+- **alarm** — hourly (KST) reads active expos from Expo's internal API and each expo's confirmed preregistration counts (total, waiting, per session) from Application's internal API, reports only expos whose counts changed since the last report to Discord, and snapshots "yesterday" confirmed counts in Redis at 00:00:30
 
 Registers with Eureka as `expo-notification-server` when `eureka.serviceUrl` is set. Settings come from the config server (`GET /configs/notification/:profile`), falling back to env. See
 `docs/events-and-config.md` for the event contract and config keys.
