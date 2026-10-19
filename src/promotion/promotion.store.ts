@@ -93,7 +93,8 @@ export class PromotionStore {
   async snapshot(limit: number): Promise<PromotionLedgerSnapshot> {
     // ioredis keyPrefix는 SCAN 패턴에 붙지 않으므로 직접 붙이고 떼어낸다.
     const prefix = this.redis.options.keyPrefix ?? '';
-    const ids: string[] = [];
+    // SCAN은 같은 키를 여러 번 돌려줄 수 있어 Set으로 거르고, limit도 고유 id 수로 센다.
+    const ids = new Set<string>();
     let cursor = '0';
     let truncated = false;
     do {
@@ -106,11 +107,13 @@ export class PromotionStore {
       );
       cursor = next;
       for (const raw of keys) {
-        if (ids.length >= limit) {
+        const id = raw.slice(prefix.length + recordPrefix.length);
+        if (ids.has(id)) continue;
+        if (ids.size >= limit) {
           truncated = true;
           break;
         }
-        ids.push(raw.slice(prefix.length + recordPrefix.length));
+        ids.add(id);
       }
     } while (cursor !== '0' && !truncated);
     const records: PromotionLedgerEntry[] = [];
