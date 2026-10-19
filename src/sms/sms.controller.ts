@@ -1,13 +1,18 @@
+import { timingSafeEqual } from 'node:crypto';
 import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
+  Inject,
   Post,
   Query,
   UsePipes,
 } from '@nestjs/common';
 import { z } from 'zod';
+import { AppConfig } from '../config/app-config';
+import { APP_CONFIG } from '../config/app-config.constants';
 import { expoIdSchema } from '../common/expo-name.provider';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { SmsAuthService } from './sms-auth.service';
@@ -23,14 +28,28 @@ const sendCodeSchema = z.object({
 });
 const verifyCodeSchema = z.object({
   phoneNumber,
-  code: z.string().regex(/^\d{4}$/),
+  // 6자리 전환(authCodeLength) 전후 모두 받는다.
+  code: z.string().regex(/^(\d{4}|\d{6})$/),
 });
 
 @Controller('sms')
 @ApiTags('문자 인증')
 @ApiResponse({ status: 500, description: '저장소 또는 외부 발송 서비스 오류' })
 export class SmsController {
-  constructor(private readonly smsAuthService: SmsAuthService) {}
+  constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly smsAuthService: SmsAuthService,
+  ) {}
+
+  private isInternal(token: string | undefined): boolean {
+    const expected = this.config.sms.authInternalToken;
+    if (!expected || token === undefined) return false;
+    const supplied = Buffer.from(token);
+    const wanted = Buffer.from(expected);
+    return (
+      supplied.length === wanted.length && timingSafeEqual(supplied, wanted)
+    );
+  }
 
   @Post()
   @ApiOperation({ summary: '인증 문자 발송' })
@@ -49,9 +68,14 @@ export class SmsController {
   })
   @ApiResponse({ status: 502, description: '인증번호 발송 실패' })
   @HttpCode(200)
-  @UsePipes(new ZodValidationPipe(sendCodeSchema))
-  async sendCode(@Body() body: SendCodeDto): Promise<void> {
-    await this.smsAuthService.sendCode(body.phoneNumber);
+  async sendCode(
+    @Body(new ZodValidationPipe(sendCodeSchema)) body: SendCodeDto,
+    @Headers('x-internal-token') token?: string,
+  ): Promise<void> {
+    await this.smsAuthService.sendCode(
+      body.phoneNumber,
+      this.isInternal(token),
+    );
   }
 
   @Post('verify')

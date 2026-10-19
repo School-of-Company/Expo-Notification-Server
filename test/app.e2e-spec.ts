@@ -246,6 +246,58 @@ describe('Notification server (e2e)', () => {
       expect(solapiSend).toHaveBeenCalledTimes(config.sms.authMaxSendCount);
     });
 
+    describe('시간당 상한 버킷 (#80)', () => {
+      const internalToken = 'i'.repeat(32);
+      const send = (phoneNumber: string, token?: string) => {
+        const req = request(app.getHttpServer()).post('/sms');
+        if (token) req.set('X-Internal-Token', token);
+        return req.send({ phoneNumber });
+      };
+
+      beforeEach(() => {
+        config.sms.authMaxSendCountPerHour = 1;
+        config.sms.authMaxInternalSendCountPerHour = 1;
+        config.sms.authInternalToken = internalToken;
+      });
+
+      it('공개 요청이 시간당 상한을 다 써도 내부 토큰 요청(참가자 인증)은 발송된다', async () => {
+        await send('01011110001').expect(200);
+        await send('01011110002').expect(429);
+
+        await send('01011110003', internalToken).expect(200);
+        expect(solapiSend).toHaveBeenCalledTimes(2);
+      });
+
+      it('토큰이 틀리면 공개 버킷으로 센다', async () => {
+        await send('01011110001').expect(200);
+
+        await send('01011110002', 'x'.repeat(32)).expect(429);
+      });
+
+      it('내부 버킷도 자기 상한을 넘으면 429', async () => {
+        await send('01011110001', internalToken).expect(200);
+
+        await send('01011110002', internalToken).expect(429);
+      });
+    });
+
+    it('authCodeLength가 6이면 6자리 코드를 보내고 그 코드로 검증된다', async () => {
+      config.sms.authCodeLength = 6;
+      await request(app.getHttpServer())
+        .post('/sms')
+        .send({ phoneNumber: '01012345678' })
+        .expect(200);
+      const code = /인증번호 (\d+)입니다/.exec(
+        sentBatches().at(-1)![0][0].text,
+      )![1];
+      expect(code).toMatch(/^\d{6}$/);
+
+      await request(app.getHttpServer())
+        .post('/sms/verify')
+        .send({ phoneNumber: '01012345678', code })
+        .expect(200);
+    });
+
     it('expoId를 보내도 받기만 하고 승인된 K1 문구로 보낸다', async () => {
       await request(app.getHttpServer())
         .post('/sms')

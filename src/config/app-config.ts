@@ -98,7 +98,20 @@ const baseAppConfigSchema = z.object({
     fromTraineeNumber: z.string().min(1),
     authCodeTtlSeconds: z.coerce.number().int().positive().default(300),
     authMaxSendCount: z.coerce.number().int().positive().default(5),
+    // 내부 토큰 없이 들어온 공개 POST /sms의 시간당 상한. 내부 토큰 요청(User 참가자 인증)은 아래 상한을 따로 쓴다 (#80).
     authMaxSendCountPerHour: z.coerce.number().int().positive().default(300),
+    authMaxInternalSendCountPerHour: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(300),
+    // User가 POST /sms에 X-Internal-Token으로 보낸다. Gateway는 클라이언트의 이 헤더를 지운다. 없으면 모두 공개 버킷이다.
+    authInternalToken: z.string().min(32).optional(),
+    // User·클라이언트의 4자리 입력 검증이 풀린 뒤 6으로 올린다. 검증은 4·6자리를 모두 받는다.
+    authCodeLength: z.coerce
+      .number()
+      .pipe(z.union([z.literal(4), z.literal(6)]))
+      .default(4),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),
     expoName: z.string().min(1).default('AI 미래교육 페스타'),
     // 카카오 K2 템플릿은 문의 줄을 뺄 수 없어 필수다.
