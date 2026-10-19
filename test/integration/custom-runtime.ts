@@ -14,6 +14,7 @@ import { SmsEventService } from '../../src/sms/sms-event.service';
 import { SmsEventGuard } from '../../src/sms/sms-event.guard';
 import { SmsEventDedupeStore } from '../../src/sms/sms-event-dedupe.store';
 import { SmsSenderProvider } from '../../src/sms/sms-sender.provider';
+import { KakaoSenderProvider } from '../../src/sms/kakao-sender.provider';
 import type { OutgoingSms } from '../../src/sms/sms-sender.provider';
 import { SOLAPI_CLIENT } from '../../src/sms/sms.constants';
 import { ParticipantNamesProvider } from '../../src/sms/participant-names.provider';
@@ -323,6 +324,11 @@ export class CustomRuntime {
         { provide: SmsEventDedupeStore, useValue: this.store },
         // The SDK client is only used by the OTP path; event sends must not touch it.
         { provide: SOLAPI_CLIENT, useValue: {} },
+        // 카톡은 문자 접수 후 부가 발송이라 이 시나리오 판정에 관여하지 않는다.
+        {
+          provide: KakaoSenderProvider,
+          useValue: { send: () => Promise.resolve() },
+        },
         {
           provide: ParticipantNamesProvider,
           useValue: { findNames: () => Promise.resolve(new Map()) },
