@@ -30,7 +30,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
   `https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}`
 - 두 형식은 다르므로 연수자에 STANDARD 템플릿을 대신 사용하지 않는다. 연수자는 Client의 기존 `{traineeId,phoneNumber}` QR를 유지하며 전화번호가 URL에 남는다. 일행 페이지/token 발급이나 일반 code 생성은 하지 않는다.
 - 치환 값은 URI 인코딩한다. HTTPS, 정확한 `/qr` 경로와 쿼리 이름/값/개수, 필수 placeholder를 검증한다. ID는 positive safe integer, STANDARD code는 영문·숫자·`_`·`-` 22자다. 자격증명/fragment/추가 쿼리를 허용하지 않는다.
-- 해당 유형의 템플릿이 없거나 비어 있으면 **선점·발송·완료 표시·완료 이벤트 발행을 모두 하지 않는다**. Kafka 처리는 정상 종료되므로 활성화 뒤 자동 재전달되지 않는다. 운영자는 필요한 이벤트를 선별해 재생해야 한다.
+- 두 템플릿은 필수다. 없거나 비어 있으면 부팅을 실패시킨다. 미설정 상태로 이벤트를 소비해 커밋하면 그 등록의 QR 문자가 영구히 유실되기 때문이다.
 - 비어 있지 않은 잘못된 템플릿, STANDARD의 누락된 participants/code, 한 통 길이 상한 초과는 발송 없이 실패하며 선점을 해제한다. 기존 최대 재시도 후 DLQ 정책을 사용한다. 성공을 거짓 기록하지 않는다.
 - code 형식 오류/중복 ID/빈 목록/6명 이상/잘못된 ID 등 스키마 오류는 기존 소비 정책대로 로그 후 건너뛰며 미발송한다. 원본을 복구하려면 운영 원본 이벤트 보관이 필요하다.
 - 구버전 STANDARD 이벤트에 code/목록이 없으면 번호로 QR를 생성하거나 code를 추측하지 않는다. 현재 User resolve API는 ID만 반환하고 names API도 code를 반환하지 않는다. User에서 현재 저장된 QR로 새 등록/재발송 이벤트를 생산하거나, 원본 outbox 목록이 있는 경우 공급자가 복구한 이벤트를 재생해야 한다. 구버전의 `done-v2`는 이미 발송한 문자이므로 완료 발행만 이어가고 `done`은 모두 건너뛴다.
@@ -165,9 +165,9 @@ processing(선점 5분) 이벤트는 건너뛰거나 DLQ로 보내지 않고 기
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
-| `POST` | `/sms` | `{ phoneNumber }` — 4자리 인증번호 발송. 번호별 상한 초과 또는 **전체 시간당 상한(`authMaxSendCountPerHour`, 기본 300) 초과 시 429**, 처리 중 인증 창이 만료되면 409(문자 미발송, 다시 요청), 게이트웨이 실패 시 502 |
-| `POST` | `/sms/verify` | `{ phoneNumber, code }` — 인증번호 검증 (없으면 404, 불일치 400, 시도 상한 초과 429 — 맞고 틀리고와 무관하게 시도마다 횟수가 오른다) |
-| `GET` | `/sms?phoneNumber=&code=` | deprecated. 위와 동일하지만 코드가 URL/접근 로그에 남는다 |
+| `POST` | `/sms` | `{ phoneNumber }` — 인증번호(`authCodeLength`, 기본 4자리) 발송. 번호별 상한 초과 또는 **시간당 상한 초과 시 429** — `X-Internal-Token`이 `sms.authInternalToken`과 맞는 요청(User 참가자 인증)은 `authMaxInternalSendCountPerHour`(기본 300), 그 밖의 공개 요청은 `authMaxSendCountPerHour`(기본 300)를 따로 센다(#80). 공개 요청이 상한을 다 써도 참가자 인증은 막히지 않는다. 처리 중 인증 창이 만료되면 409(문자 미발송, 다시 요청), 게이트웨이 실패 시 502 |
+| `POST` | `/sms/verify` | `{ phoneNumber, code }` — 인증번호(4자리 또는 6자리) 검증 (없으면 404, 불일치 400, 시도 상한 초과 429 — 맞고 틀리고와 무관하게 시도마다 횟수가 오른다) |
+| `GET` | `/sms?phoneNumber=&code=` | deprecated. 위와 동일하지만 코드가 URL/접근 로그에 남는다. Expo-Android(develop)가 아직 쓰고 있어 남겨 둔다. Android가 `POST /sms/verify`로 옮기면 제거하고 Gateway `publicPaths`에서도 뺀다 |
 
 > 인증 창(`sms:auth:{phoneNumber}` hash): 첫 발송이 Lua로 TTL(`authCodeTtlSeconds`)과 창 토큰을 함께 심고, 창 안의 재발송은 TTL을 늘리지 않으며 검증 시도 횟수도 유지한다. 코드 저장·시도 횟수·인증 표시는 Lua로 같은 창 토큰일 때만 반영하므로, 처리 중 창이 만료되면 TTL 없는 키를 되살리거나 그 사이 열린 새 창을 덮어쓰지 않는다. 발송은 이때 새 창을 열지 않고 409로 실패하고(번호별 상한 우회 방지, 전체 시간당 카운터는 이미 소모), 검증은 404로 본다. 창 토큰이 없는 이전 버전 키는 인증에 쓰지 않고 다음 발송 때 새 창으로 바꾼다.
 
@@ -206,13 +206,15 @@ sms:                                   # 비밀 값은 Vault
   fromTraineeNumber: "…"
   authCodeTtlSeconds: 300
   authMaxSendCount: 5
-  authMaxSendCountPerHour: 300
+  authMaxSendCountPerHour: 300         # 공개 POST /sms 버킷
+  authMaxInternalSendCountPerHour: 300 # 내부 토큰(User 참가자 인증) 버킷
+  authCodeLength: 4                    # 4 또는 6. User·클라이언트가 6자리를 받게 된 뒤 6으로 올린다
   eventMaxAttempts: 5
   authMaxVerifyAttemptCount: 5
   contactStandardNumber: "…"           # 필수, QR 문자의 (문의) 줄
   contactTraineeNumber: "…"            # 필수
-  qrUrlTemplate: ""                     # 비어 있으면 일반 QR 문자 미발송
-  traineeQrUrlTemplate: ""              # 비어 있으면 연수 QR 문자 미발송
+  qrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&code={code}"   # 필수
+  traineeQrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}"   # 필수
 user:                                  # 이름 조회, 통째로 생략하면 역할 라벨
   baseUrl: "http://<USER_HOST>:8080"
   internalToken: "…"                    # Vault, 32자 이상
@@ -223,7 +225,7 @@ expo:                                  # 등록 인원 리포트의 박람회 �
 
 | 위치 | 키 |
 |---|---|
-| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회), `expo.internalToken` (32자 이상, Expo의 내부 토큰 사본, 박람회 목록·사전등록 회차 조회) |
+| Vault `secret/notification` | `sms.apiKey`, `sms.apiSecret`, `discord.participantNumberUrl`, `redis.password`, `user.internalToken` (32자 이상, User의 내부 토큰 사본, 이름 조회), `sms.authInternalToken` (선택, 32자 이상, User가 `POST /sms`에 `X-Internal-Token`으로 보내는 값. env `SMS_AUTH_INTERNAL_TOKEN`), `expo.internalToken` (32자 이상, Expo의 내부 토큰 사본, 박람회 목록·사전등록 회차 조회) |
 
 env 이름 조회 키는 `USER_SERVICE_URL`, `USER_SERVICE_INTERNAL_TOKEN`이다. 둘 다 없으면 fallback하고 일부만 설정되었거나 토큰/URL이 잘못되면 부팅을 실패시킨다. Expo 연결 env 키는 `EXPO_SERVICE_URL`, `EXPO_SERVICE_INTERNAL_TOKEN`이며 규칙은 같다. Attention HTTP 설정은 제거했다. User 이름 API만 사용하며 제거된 `sms-try` HTTP 호출은 복구하지 않는다.
 

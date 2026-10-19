@@ -171,6 +171,32 @@ describe('SmsAuthService', () => {
       );
     });
 
+    it('내부 요청은 내부 버킷(internal:YYYY-MM-DDTHH)과 내부 상한을 쓴다', async () => {
+      store.increaseGlobalSendCount.mockResolvedValue(
+        config.sms.authMaxSendCountPerHour + 1,
+      );
+      config.sms.authMaxInternalSendCountPerHour =
+        config.sms.authMaxSendCountPerHour + 1;
+
+      await expect(
+        service.sendCode('01012345678', true),
+      ).resolves.toBeUndefined();
+      expect(store.increaseGlobalSendCount).toHaveBeenCalledWith(
+        expect.stringMatching(/^internal:\d{4}-\d{2}-\d{2}T\d{2}$/),
+      );
+      config.sms.authMaxInternalSendCountPerHour =
+        config.sms.authMaxSendCountPerHour;
+    });
+
+    it('authCodeLength가 6이면 6자리 코드를 저장한다', async () => {
+      config.sms.authCodeLength = 6;
+
+      await service.sendCode('01012345678');
+
+      expect(savedCode()).toMatch(/^\d{6}$/);
+      config.sms.authCodeLength = 4;
+    });
+
     it('상한과 같은 횟수까지는 허용한다', async () => {
       store.increaseSendCount.mockResolvedValue({
         count: config.sms.authMaxSendCount,

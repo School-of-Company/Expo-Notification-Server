@@ -52,7 +52,7 @@ describe('SMS 인증 창 만료 경합 (실제 Redis)', () => {
     const sender = {
       send: jest.fn((messages: Array<{ text: string }>) => {
         sent.push(
-          ...messages.map((m) => /\[(\d{4})\]/.exec(m.text)?.[1] ?? m.text),
+          ...messages.map((m) => /인증번호 (\d+)/.exec(m.text)?.[1] ?? m.text),
         );
         return Promise.resolve({ total: messages.length, failedTo: [] });
       }),

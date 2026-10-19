@@ -25,6 +25,8 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       authCodeTtlSeconds: 180,
       authMaxSendCount: 5,
       authMaxSendCountPerHour: 300,
+      authMaxInternalSendCountPerHour: 300,
+      authCodeLength: 4,
       eventMaxAttempts: 5,
       expoName: '광주 박람회',
       contactStandardNumber: '062-380-4504',
