@@ -60,6 +60,7 @@ Kafka ACK는 발행 완료이며 문자 전달 완료가 아니다. 비밀값·�
 | UNKNOWN/SENDING, messageId 없음 | 공급자가 해당 eventId+attemptId 미접수를 확인한 답변/콘솔 기록(시각 범위 포함) | 운영 승인 담당자 1인 + 기록 |
 | OPERATIONS `MISSING_REPRESENTATIVE_PHONE` | Application/User에 대표 번호가 보정된 기록 | 운영 승인 담당자 |
 | OPERATIONS `MESSAGE_TOO_LONG` | 회차 정보 보정 기록 | 운영 승인 담당자 |
+| OPERATIONS `INVALID_CHECK_RESPONSE` | Application check 응답이 계약에 맞게 고쳐진 기록(배포·데이터 보정) | 운영 승인 담당자 |
 | OPERATIONS 5회 실패 | 공급자 실패 코드 원인 해소 기록 | 운영 승인 담당자 |
 
 승인 기록 ID를 `approvalRef`로 넣어 `POST :eventId/resumption`을 호출한다. 승인 담당자 지정은 팀이 정한다.

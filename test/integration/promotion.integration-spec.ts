@@ -117,9 +117,10 @@ describe('promotion HTTP/Kafka/Redis contracts with synthetic SMS', () => {
     await runtime.publish(rejected);
     await runtime.committed(2);
     expect(runtime.http.sms).toHaveLength(1);
+    // #95 계약 위반 응답은 다시 조회해도 같으므로 운영 확인으로 끝낸다.
     expect(await runtime.store.get(rejected.eventId)).toMatchObject({
-      status: 'PENDING',
-      reason: 'LOOKUP_UNAVAILABLE',
+      status: 'OPERATIONS',
+      reason: 'INVALID_CHECK_RESPONSE',
     });
   });
 

@@ -92,3 +92,10 @@ export class PromotionRetryError extends Error {
     super('promotion retry required');
   }
 }
+
+// 계약에 맞지 않는 check 응답은 다시 조회해도 같으므로 재시도하지 않는다.
+export class PromotionInvalidCheckError extends Error {
+  constructor() {
+    super('promotion check response invalid');
+  }
+}
