@@ -88,6 +88,9 @@ export const promotionOfferRecordSchema = z.object({
 });
 export type PromotionOfferRecord = z.infer<typeof promotionOfferRecordSchema>;
 
+// Well past the 30s claim and 10s provider timeout, so only an abandoned attempt is still SENDING by then.
+export const promotionOfferSendingStaleMs = 5 * 60_000;
+
 export class PromotionOfferRetryError extends Error {
   constructor() {
     super('promotion offer retry required');
