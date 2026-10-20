@@ -221,6 +221,12 @@ export class PromotionOfferService {
         eventId: record.event.eventId,
         status: record.report,
       });
+    if (outcome === 'rejected')
+      this.logger.warn({
+        message: '참여 제안 결과 보고가 400/404로 거절되어 폐기함',
+        eventId: record.event.eventId,
+        status: record.report,
+      });
     const reported = { ...record, report: undefined };
     await this.store.save(reported, token);
     return reported;
