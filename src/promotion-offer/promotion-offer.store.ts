@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import {
   promotionOfferRecordSchema,
+  promotionOfferSendingStaleMs,
   PromotionOfferRetryError,
 } from './promotion-offer.schema';
 import type {
@@ -65,7 +66,9 @@ export class PromotionOfferStore {
         ? Date.now() + 5000
         : record.status === 'ACCEPTED'
           ? Date.now() + 30000
-          : 0;
+          : record.status === 'SENDING'
+            ? Date.now() + promotionOfferSendingStaleMs
+            : 0;
     const result = await this.redis.eval(
       `
       if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end

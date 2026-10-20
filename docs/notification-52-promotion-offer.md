@@ -13,6 +13,7 @@ Application #144의 참여 제안 문자를 보낸다. 승급 완료 안내(#20,
    - 접수 성공이면 성공 응답을 받은 시각을 `acceptedAt`으로 저장하고 `ACCEPTED`를 보고한다. Application은 이 시각 + 6시간(마감 상한)을 응답 기한으로 쓴다.
    - 공급자 거절이면 다시 확인한 뒤 재시도하고, 5회째 거절이면 `FAILED`를 보고한다.
    - 접수 여부를 알 수 없으면 `UNKNOWN`을 보고하고 자동으로 다시 보내지 않는다.
+   - 크래시나 결과 저장 실패로 `SENDING`에 5분 넘게 남은 레코드는 스케줄러가 `UNKNOWN`(`PROVIDER_ACCEPTANCE_UNKNOWN`)으로 보고한다. 다시 보내지 않는다(#90).
 5. `ACCEPTED`는 30초마다 전달 결과를 조회한다. 전달 성공이면 `DELIVERED`, 확정 실패면 `FAILED`를 보고하며, 다시 보내지 않는다.
 6. 보고는 `POST /internal/promotion-offers/{offerId}/deliveries`로 한다. 보내지 못한 보고는 레코드의 `report`에 남기고 5초마다 다시 보낸다. 409(다른 결과·새 이벤트)는 재시도하지 않고 운영 확인 로그를 남긴다.
 
@@ -28,12 +29,12 @@ Application #144의 참여 제안 문자를 보낸다. 승급 완료 안내(#20,
 
 ```yaml
 promotionOffer:
-  enabled: false                 # PROMOTION_OFFER_ENABLED
-  internalToken: <32자 이상>      # PROMOTION_OFFER_INTERNAL_TOKEN
-  topic: application.promotion-offer.requested     # KAFKA_PROMOTION_OFFER_TOPIC
+  enabled: false # PROMOTION_OFFER_ENABLED
+  internalToken: <32자 이상> # PROMOTION_OFFER_INTERNAL_TOKEN
+  topic: application.promotion-offer.requested # KAFKA_PROMOTION_OFFER_TOPIC
   groupId: expo-notification-server.promotion-offer # KAFKA_PROMOTION_OFFER_GROUP_ID
   application:
-    baseUrl: <Application URL>   # PROMOTION_OFFER_APPLICATION_URL
+    baseUrl: <Application URL> # PROMOTION_OFFER_APPLICATION_URL
     internalToken: <Application APPLICATION_INTERNAL_TOKEN> # PROMOTION_OFFER_APPLICATION_INTERNAL_TOKEN
 ```
 
