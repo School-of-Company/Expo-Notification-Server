@@ -96,3 +96,10 @@ export class PromotionOfferRetryError extends Error {
     super('promotion offer retry required');
   }
 }
+
+// A response that breaks the check contract repeats on every lookup; retrying it only holds the seats.
+export class PromotionOfferInvalidCheckError extends Error {
+  constructor() {
+    super('promotion offer check response invalid');
+  }
+}

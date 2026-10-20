@@ -10,7 +10,10 @@ import { promotionMessage } from './promotion-message';
 import { PromotionSolapiProvider } from './promotion-solapi.provider';
 import type { PromotionDelivery } from './promotion-solapi.provider';
 import { PromotionStore } from './promotion.store';
-import { PromotionRetryError } from './promotion.schema';
+import {
+  PromotionInvalidCheckError,
+  PromotionRetryError,
+} from './promotion.schema';
 import type { PromotionEvent, PromotionRecord } from './promotion.schema';
 
 export type PromotionResumeResult =
@@ -122,6 +125,21 @@ export class PromotionService {
         check = await this.application.check(record.event);
       } catch (error) {
         if (!(error instanceof Error)) throw error;
+        if (error instanceof PromotionInvalidCheckError) {
+          await this.store.save(
+            {
+              ...record,
+              status: 'OPERATIONS',
+              reason: 'INVALID_CHECK_RESPONSE',
+            },
+            token,
+          );
+          this.logger.error({
+            message: '승급 안내 확인 응답 계약 위반 운영 확인 필요',
+            eventId: id,
+          });
+          return;
+        }
         await this.store.save(
           { ...record, reason: 'LOOKUP_UNAVAILABLE' },
           token,

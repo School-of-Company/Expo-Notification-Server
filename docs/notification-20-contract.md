@@ -107,7 +107,7 @@ Application develop `88819e75bdb028a8968db1764aa39ca02366ac6b`를 원격에서 �
 - `UNKNOWN`: timeout, 네트워크 오류, 5xx, 해석할 수 없는 접수 응답. 자동 재발송하지 않는다.
 - `ACCEPTED`: groupId/messageId를 받았지만 전달 완료는 아니다. 30초 간격 결과 조회만 한다.
 - `DELIVERED`: 공급자 COMPLETE+4000 확인. `SKIPPED`: 취소/교체/옛 승급.
-- `OPERATIONS`: 실제 대표 번호 없음, 메시지 2000 byte 초과 또는 5회 확실한 실패.
+- `OPERATIONS`: 실제 대표 번호 없음, 메시지 2000 byte 초과, check 응답 계약 위반(`INVALID_CHECK_RESPONSE`, #95) 또는 5회 확실한 실패.
   자동 재시도하지 않는다. 개인정보(번호·이름·본문)는 Redis 원장에 저장하지 않는다.
 - `GET /internal/promotion-notifications/:eventId`는 전용 내부 토큰으로 상태/원인/시도 식별자를 조회한다.
   `POST .../:eventId/reconciliation` body `{"messageId":"공급자 ID"}`는 공급자 GET 결과의
