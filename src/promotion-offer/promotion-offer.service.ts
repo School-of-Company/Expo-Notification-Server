@@ -9,6 +9,7 @@ import { promotionOfferMessage } from './promotion-offer-message';
 import { PromotionOfferStore } from './promotion-offer.store';
 import {
   promotionOfferSendingStaleMs,
+  PromotionOfferInvalidCheckError,
   PromotionOfferRetryError,
 } from './promotion-offer.schema';
 import type {
@@ -87,6 +88,22 @@ export class PromotionOfferService {
         check = await this.application.check(record.event);
       } catch (error) {
         if (!(error instanceof Error)) throw error;
+        if (error instanceof PromotionOfferInvalidCheckError) {
+          this.logger.error({
+            message: '참여 제안 확인 응답 계약 위반 운영 확인 필요',
+            eventId: id,
+          });
+          await this.finish(
+            {
+              ...record,
+              status: 'FAILED',
+              reason: 'INVALID_CHECK_RESPONSE',
+              report: 'FAILED',
+            },
+            token,
+          );
+          return;
+        }
         await this.store.save(
           { ...record, reason: 'LOOKUP_UNAVAILABLE' },
           token,

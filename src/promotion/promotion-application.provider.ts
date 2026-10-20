@@ -2,7 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
 import { postInternal } from '../common/internal-http';
-import { promotionCheckSchema, PromotionRetryError } from './promotion.schema';
+import {
+  promotionCheckSchema,
+  PromotionInvalidCheckError,
+  PromotionRetryError,
+} from './promotion.schema';
 import type { PromotionCheck, PromotionEvent } from './promotion.schema';
 
 @Injectable()
@@ -22,7 +26,7 @@ export class PromotionApplicationProvider {
     );
     const body: unknown = await response.json();
     const parsed = promotionCheckSchema.safeParse(body);
-    if (!parsed.success) throw new PromotionRetryError();
+    if (!parsed.success) throw new PromotionInvalidCheckError();
     const result = parsed.data;
     if (
       result.eligible &&
@@ -33,7 +37,7 @@ export class PromotionApplicationProvider {
         result.programType !== event.programType ||
         result.programId !== event.programId)
     )
-      throw new PromotionRetryError();
+      throw new PromotionInvalidCheckError();
     return result;
   }
 }

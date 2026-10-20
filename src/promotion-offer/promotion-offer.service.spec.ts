@@ -4,6 +4,10 @@ import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import type { PromotionSolapiProvider } from '../promotion/promotion-solapi.provider';
 import type { PromotionOfferApplicationProvider } from './promotion-offer-application.provider';
 import { promotionOfferMessage } from './promotion-offer-message';
+import {
+  PromotionOfferInvalidCheckError,
+  PromotionOfferRetryError,
+} from './promotion-offer.schema';
 import type {
   PromotionOfferCheck,
   PromotionOfferEvent,
@@ -175,6 +179,44 @@ describe('promotion offer delivery', () => {
     await service.process(event.eventId);
     expect(send).toHaveBeenCalledTimes(1);
     expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an invalid check response once as FAILED and stops looking it up (#95)', async () => {
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    check.mockRejectedValue(new PromotionOfferInvalidCheckError());
+    await service.handle(event);
+    await service.process(event.eventId);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(record()).toMatchObject({
+      status: 'FAILED',
+      reason: 'INVALID_CHECK_RESPONSE',
+    });
+    expect(record().report).toBeUndefined();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        report: 'FAILED',
+        reason: 'INVALID_CHECK_RESPONSE',
+      }),
+    );
+    expect(error).toHaveBeenCalledTimes(1);
+    error.mockRestore();
+  });
+
+  it('keeps a transient lookup failure pending without reporting', async () => {
+    check.mockRejectedValueOnce(new PromotionOfferRetryError());
+    await service.handle(event);
+    expect(record()).toMatchObject({
+      status: 'PENDING',
+      reason: 'LOOKUP_UNAVAILABLE',
+    });
+    expect(report).not.toHaveBeenCalled();
+    await service.process(event.eventId);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(record().status).toBe('ACCEPTED');
   });
 
   it('skips outside the send window and before any provider request', async () => {

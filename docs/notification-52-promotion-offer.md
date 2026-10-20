@@ -9,6 +9,7 @@ Application #144의 참여 제안 문자를 보낸다. 승급 완료 안내(#20,
    - `NOT_CURRENT_OFFER`이면 보고하지 않고 끝낸다.
    - `OUTSIDE_SEND_WINDOW`(09:00~18:00 KST 밖)이거나 `sendWindowEndsAt`이 지났으면 공급자 호출 전에 `SKIPPED`로 끝내고 보고한다. Application이 다음 09:00에 새 eventId로 다시 예약한다.
 3. 대표 번호가 없거나 본문이 2000바이트를 넘으면 공급자 호출 없이 `FAILED`로 보고한다.
+   - check 응답이 계약(`promotionOfferCheckSchema`, 같은 eventId·offerId·expoId)에 맞지 않으면 다시 조회하지 않고 `FAILED`(`INVALID_CHECK_RESPONSE`)로 보고하며 운영 확인 로그를 한 번 남긴다(#95). 연결 실패·타임아웃·5xx(502 포함)는 `LOOKUP_UNAVAILABLE`로 두고 5초마다 다시 조회한다.
 4. `SENDING`(`attemptId`, `attemptedAt`)을 먼저 저장한 뒤 Solapi `send-many/detail`을 한 번 호출한다(승급 안내와 같은 transport).
    - 접수 성공이면 성공 응답을 받은 시각을 `acceptedAt`으로 저장하고 `ACCEPTED`를 보고한다. Application은 이 시각 + 6시간(마감 상한)을 응답 기한으로 쓴다.
    - 공급자 거절이면 다시 확인한 뒤 재시도하고, 5회째 거절이면 `FAILED`를 보고한다.

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import {
   mockKakaoFetch,
@@ -7,6 +8,10 @@ import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
 import type { ExpoNameProvider } from '../common/expo-name.provider';
 import type { PromotionApplicationProvider } from './promotion-application.provider';
 import type { PromotionSolapiProvider } from './promotion-solapi.provider';
+import {
+  PromotionInvalidCheckError,
+  PromotionRetryError,
+} from './promotion.schema';
 import type { PromotionCheck, PromotionRecord } from './promotion.schema';
 import { PromotionService } from './promotion.service';
 import type { PromotionStore } from './promotion.store';
@@ -264,6 +269,36 @@ describe('PromotionService 복구 보류와 수동 재개(#32)', () => {
       'NOT_RESUMABLE',
     );
     expect(store.save).not.toHaveBeenCalled();
+  });
+
+  it('check 응답이 계약과 다르면 다시 조회하지 않고 OPERATIONS로 끝내며 로그를 한 번 남긴다(#95)', async () => {
+    const error = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const { service, store, check, send } = setup(base);
+    check.mockRejectedValue(new PromotionInvalidCheckError());
+
+    await service.process(event.eventId);
+
+    expect(store.save).toHaveBeenCalledTimes(1);
+    expect(store.save.mock.calls[0]?.[0]).toMatchObject({
+      status: 'OPERATIONS',
+      reason: 'INVALID_CHECK_RESPONSE',
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledTimes(1);
+  });
+
+  it('일시 조회 장애는 PENDING으로 남겨 다시 조회한다', async () => {
+    const { service, store, check } = setup(base);
+    check.mockRejectedValue(new PromotionRetryError());
+
+    await service.process(event.eventId);
+
+    expect(store.save.mock.calls[0]?.[0]).toMatchObject({
+      status: 'PENDING',
+      reason: 'LOOKUP_UNAVAILABLE',
+    });
   });
 
   it('선점 중이면 BUSY, 기록이 없으면 NOT_FOUND', async () => {

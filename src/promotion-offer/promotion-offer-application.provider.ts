@@ -4,6 +4,7 @@ import type { AppConfig } from '../config/app-config';
 import { InternalCallError, postInternal } from '../common/internal-http';
 import {
   promotionOfferCheckSchema,
+  PromotionOfferInvalidCheckError,
   PromotionOfferRetryError,
 } from './promotion-offer.schema';
 import type {
@@ -36,7 +37,7 @@ export class PromotionOfferApplicationProvider {
     );
     const body: unknown = await response.json();
     const parsed = promotionOfferCheckSchema.safeParse(body);
-    if (!parsed.success) throw new PromotionOfferRetryError();
+    if (!parsed.success) throw new PromotionOfferInvalidCheckError();
     const result = parsed.data;
     if (
       result.eligible &&
@@ -44,7 +45,7 @@ export class PromotionOfferApplicationProvider {
         result.offerId !== event.offerId ||
         result.expoId !== event.expoId)
     )
-      throw new PromotionOfferRetryError();
+      throw new PromotionOfferInvalidCheckError();
     return result;
   }
 
