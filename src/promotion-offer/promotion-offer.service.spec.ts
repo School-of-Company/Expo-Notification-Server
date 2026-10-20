@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import type { PromotionSolapiProvider } from '../promotion/promotion-solapi.provider';
@@ -216,6 +217,25 @@ describe('promotion offer delivery', () => {
     expect(report).toHaveBeenLastCalledWith(
       expect.objectContaining({ report: 'FAILED' }),
     );
+  });
+
+  it('drops a report Application rejects with 400/404 instead of retrying it forever', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    report.mockResolvedValueOnce('rejected');
+    await service.handle(event);
+    // No owed report left, so the scheduler never re-sends it.
+    expect(record().report).toBeUndefined();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: event.eventId,
+        status: 'ACCEPTED',
+      }),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('01000000000');
+    warn.mockRestore();
   });
 
   it('shows a deadline never later than the real one and capped by the hard cutoff', () => {

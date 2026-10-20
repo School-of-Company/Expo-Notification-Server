@@ -12,7 +12,7 @@ import type {
   PromotionOfferRecord,
 } from './promotion-offer.schema';
 
-export type ReportOutcome = 'recorded' | 'stale' | 'retry';
+export type ReportOutcome = 'recorded' | 'stale' | 'rejected' | 'retry';
 
 @Injectable()
 export class PromotionOfferApplicationProvider {
@@ -49,6 +49,7 @@ export class PromotionOfferApplicationProvider {
   }
 
   // 409 means Application already holds a different result or a newer event; retrying cannot change that.
+  // 400 (e.g. clock skew on acceptedAt) and 404 (offer expired or deleted) repeat identically on every retry.
   async report(record: PromotionOfferRecord): Promise<ReportOutcome> {
     const connection = this.connection();
     try {
@@ -70,11 +71,9 @@ export class PromotionOfferApplicationProvider {
       );
       return 'recorded';
     } catch (error) {
-      if (
-        error instanceof InternalCallError &&
-        error.message.endsWith('responded 409')
-      )
-        return 'stale';
+      if (!(error instanceof InternalCallError)) return 'retry';
+      if (error.message.endsWith('responded 409')) return 'stale';
+      if (/responded (400|404)$/.test(error.message)) return 'rejected';
       return 'retry';
     }
   }
