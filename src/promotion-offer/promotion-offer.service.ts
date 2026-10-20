@@ -7,7 +7,10 @@ import type { PromotionDelivery } from '../promotion/promotion-solapi.provider';
 import { PromotionOfferApplicationProvider } from './promotion-offer-application.provider';
 import { promotionOfferMessage } from './promotion-offer-message';
 import { PromotionOfferStore } from './promotion-offer.store';
-import { PromotionOfferRetryError } from './promotion-offer.schema';
+import {
+  promotionOfferSendingStaleMs,
+  PromotionOfferRetryError,
+} from './promotion-offer.schema';
 import type {
   PromotionOfferEvent,
   PromotionOfferRecord,
@@ -52,6 +55,28 @@ export class PromotionOfferService {
         );
         if (!result) throw new PromotionOfferRetryError();
         await this.finish(this.deliveryRecord(record, result), token);
+        return;
+      }
+      if (record.status === 'SENDING') {
+        // A crash or a failed result save left the attempt open; acceptance is unknown, so report it and never resend.
+        if (
+          Date.now() - Date.parse(record.attemptedAt ?? '') <
+          promotionOfferSendingStaleMs
+        )
+          return;
+        this.logger.error({
+          message: '참여 제안 문자 공급자 접수 여부 운영 확인 필요',
+          eventId: id,
+        });
+        await this.finish(
+          {
+            ...record,
+            status: 'UNKNOWN',
+            reason: 'PROVIDER_ACCEPTANCE_UNKNOWN',
+            report: 'UNKNOWN',
+          },
+          token,
+        );
         return;
       }
       if (record.status !== 'PENDING') return;
@@ -218,6 +243,12 @@ export class PromotionOfferService {
     if (outcome === 'stale')
       this.logger.error({
         message: '참여 제안 결과를 Application이 거절함, 운영 확인 필요',
+        eventId: record.event.eventId,
+        status: record.report,
+      });
+    if (outcome === 'rejected')
+      this.logger.warn({
+        message: '참여 제안 결과 보고가 400/404로 거절되어 폐기함',
         eventId: record.event.eventId,
         status: record.report,
       });

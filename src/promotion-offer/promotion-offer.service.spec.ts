@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import type { PromotionSolapiProvider } from '../promotion/promotion-solapi.provider';
@@ -145,6 +146,37 @@ describe('promotion offer delivery', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it('reports an abandoned SENDING attempt as UNKNOWN once it is stale and never resends (#90)', async () => {
+    const save = (saved: PromotionOfferRecord) => {
+      store.records.set(saved.event.eventId, saved);
+      return Promise.resolve();
+    };
+    store.save = (saved) =>
+      saved.status === 'ACCEPTED'
+        ? Promise.reject(new Error('redis down'))
+        : save(saved);
+    await expect(service.handle(event)).rejects.toThrow('redis down');
+    expect(record().status).toBe('SENDING');
+    expect(report).not.toHaveBeenCalled();
+    // A redelivery inside the window may still be the live attempt; it neither sends nor reports.
+    await service.process(event.eventId);
+    expect(record().status).toBe('SENDING');
+    jest.setSystemTime(now + 5 * 60_000);
+    await service.process(event.eventId);
+    expect(record()).toMatchObject({
+      status: 'UNKNOWN',
+      reason: 'PROVIDER_ACCEPTANCE_UNKNOWN',
+    });
+    expect(record().report).toBeUndefined();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ report: 'UNKNOWN' }),
+    );
+    await service.process(event.eventId);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
   it('skips outside the send window and before any provider request', async () => {
     check.mockResolvedValue({
       eligible: false,
@@ -216,6 +248,25 @@ describe('promotion offer delivery', () => {
     expect(report).toHaveBeenLastCalledWith(
       expect.objectContaining({ report: 'FAILED' }),
     );
+  });
+
+  it('drops a report Application rejects with 400/404 instead of retrying it forever', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    report.mockResolvedValueOnce('rejected');
+    await service.handle(event);
+    // No owed report left, so the scheduler never re-sends it.
+    expect(record().report).toBeUndefined();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: event.eventId,
+        status: 'ACCEPTED',
+      }),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('01000000000');
+    warn.mockRestore();
   });
 
   it('shows a deadline never later than the real one and capped by the hard cutoff', () => {
