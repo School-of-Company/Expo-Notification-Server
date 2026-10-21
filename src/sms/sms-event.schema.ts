@@ -15,7 +15,7 @@ export const smsEventSchema = z.discriminatedUnion('type', [
     type: z.literal('DRAW_RESULT'),
     phoneNumber,
     drawNumber: z.number().int().nonnegative(),
-    // K4 문구에는 행사명이 없어 아직 쓰지 않는다. Form이 보내도 거절하지 않도록 받는다.
+    // #{행사명} 조회용. 없으면 sms.expoName이다.
     expoId: expoIdSchema.optional(),
   }),
   z.object({

@@ -92,9 +92,9 @@ describe('QrSmsService', () => {
   describe('알림톡(K2)', () => {
     const expected =
       '광주 박람회 등록이 완료되었습니다.\n입장할 때 아래 QR 링크를 입구에서 보여 주세요.\n\n' +
-      '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
+      '▶ 신청 확인(QR확인): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
       'a'.repeat(22) +
-      '\n(문의) ☎062-380-4504';
+      '\n\n※ 본 메시지는 2026 AI미래교육박람회 신청자에게 발송되었습니다.';
 
     it('templateId가 있으면 문자를 먼저 보내고 같은 문구의 카톡(disableSms: true)을 따로 한 건 보낸다', async () => {
       config.kakao = { pfId: 'pf-1', auto: { qrRegistered: 'k2' } };
@@ -117,10 +117,9 @@ describe('QrSmsService', () => {
             disableSms: true,
             variables: {
               '#{행사명}': '광주 박람회',
-              '#{QR링크}':
-                '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
+              '#{URL}':
+                'https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
                 'a'.repeat(22),
-              '#{문의번호}': '062-380-4504',
             },
           },
         },
@@ -203,9 +202,11 @@ describe('QrSmsService', () => {
         text: text(),
       },
     ]);
+    // 링크가 하나면 이름 라벨 없이 URL만 넣는다.
     expect(text()).toContain(
-      '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
-        'a'.repeat(22),
+      '▶ 신청 확인(QR확인): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=' +
+        'a'.repeat(22) +
+        '\n',
     );
     expect(text()).not.toContain(standard.phoneNumber);
     expect(titleOf).toHaveBeenCalledWith('expo-1');
@@ -264,7 +265,13 @@ describe('QrSmsService', () => {
 
   it('이름 조회 실패는 대표자 라벨로 대체하고 발송을 계속한다', async () => {
     fetchSpy.mockRejectedValue(new Error('private name/code/link'));
-    await service.handle(standard);
+    await service.handle({
+      ...standard,
+      participants: [
+        { id: 42, code: 'a'.repeat(22) },
+        { id: 43, code: 'b'.repeat(22) },
+      ],
+    });
     expect(text()).toContain('대표자:');
     expect(send).toHaveBeenCalledTimes(1);
     expect(publish).toHaveBeenCalledTimes(1);

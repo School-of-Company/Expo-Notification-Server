@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { ExpoNameProvider } from '../common/expo-name.provider';
 import { maskPhone } from '../common/mask-phone';
 import {
   SmsDeliveryRejectedError,
@@ -22,11 +23,18 @@ export class SmsEventService {
     private readonly guard: SmsEventGuard,
     private readonly sender: SmsSenderProvider,
     private readonly kakao: KakaoSenderProvider,
+    private readonly expoNames: ExpoNameProvider,
   ) {}
 
   async handle(event: SmsEvent): Promise<void> {
     await this.guard.once(event.eventId, async (beginSend) => {
-      const { to, senderType, text, variables } = renderSms(event);
+      const { to, senderType, text, variables } = renderSms(event, {
+        // CUSTOM은 행사명을 쓰지 않아 조회하지 않는다(expoId 없이 부르면 기본 행사명만 돌려준다).
+        expoName: await this.expoNames.titleOf(
+          event.type === 'DRAW_RESULT' ? event.expoId : undefined,
+        ),
+        prizePlace: this.config.sms.drawPrizePlace,
+      });
       // CUSTOM은 승인 템플릿이 없는 자유 문구라 문자로만 보낸다.
       const kakaoOptions =
         variables &&

@@ -29,8 +29,7 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       authCodeLength: 4,
       eventMaxAttempts: 5,
       expoName: '광주 박람회',
-      contactStandardNumber: '062-380-4504',
-      contactTraineeNumber: '062-380-4587',
+      drawPrizePlace: '입구 운영본부',
       qrUrlTemplate:
         'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
       traineeQrUrlTemplate:

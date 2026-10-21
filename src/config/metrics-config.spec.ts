@@ -7,8 +7,6 @@ const env = {
   SMS_API_SECRET: 'synthetic-secret',
   SMS_FROM_STANDARD_NUMBER: '01000000000',
   SMS_FROM_TRAINEE_NUMBER: '01000000001',
-  SMS_CONTACT_STANDARD_NUMBER: '0620000000',
-  SMS_CONTACT_TRAINEE_NUMBER: '0620000001',
   SMS_QR_URL_TEMPLATE:
     'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
   SMS_TRAINEE_QR_URL_TEMPLATE:

@@ -65,7 +65,6 @@ describe('buildQrPageLinks', () => {
       });
       const { text } = renderQrSms({
         expoName: '광주 박람회',
-        contactNumber: '062-380-4504',
         links: links.map(({ url }, i) => ({
           label: '가'.repeat(10) + (i === 0 ? '(대표자)' : ''),
           url,

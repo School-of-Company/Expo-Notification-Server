@@ -10,19 +10,35 @@ export const QR_REGISTERED_TEMPLATE = [
   '#{행사명} 등록이 완료되었습니다.',
   '입장할 때 아래 QR 링크를 입구에서 보여 주세요.',
   '',
-  '#{QR링크}',
-  '(문의) ☎#{문의번호}',
+  '▶ 신청 확인(QR확인): #{URL}',
+  '',
+  '※ 본 메시지는 2026 AI미래교육박람회 신청자에게 발송되었습니다.',
 ].join('\n');
 export const PROMOTION_TEMPLATE = [
-  '[#{행사명}] 프로그램 대기 승급 안내',
-  '#{이름}님의 프로그램 신청이 확정되었습니다.',
+  '[#{행사명}] 프로그램 참가 확정 안내',
+  '',
+  '#{이름}님, 대기 신청하신 프로그램의 참가가 확정되었습니다.',
+  '',
   '프로그램: #{프로그램}',
   '일시: #{일시}',
   '장소: #{장소}',
-  '신청 조회: #{신청조회}',
+  '',
+  '▶ 행사 안내: https://www.hiaisw.kr',
+  '▶ 신청 확인·취소: #{URL}',
+  '',
+  '※ 본 메시지는 2026 AI미래교육박람회 프로그램 참가 확정자에게 발송되었습니다.',
 ].join('\n');
-export const DRAW_RESULT_TEMPLATE =
-  '축 당첨! 설문조사 행운의 숫자에 당첨되셨습니다. 선물은 입구 운영본부에서 받아가세요!\n#{번호}번!';
+export const DRAW_RESULT_TEMPLATE = [
+  '[#{행사명}] 행운의 숫자 당첨 안내',
+  '',
+  '축하합니다! 🎉',
+  "설문조사 이벤트 '행운의 숫자'에 당첨되셨습니다.",
+  '',
+  '▶ 당첨 번호: #{번호}번',
+  '▶ 경품 수령 장소: #{장소}',
+  '',
+  '※ 본 메시지는 #{행사명} 설문 참여자 중 당첨자에게 발송되었습니다.',
+].join('\n');
 
 export interface TemplateMessage {
   text: string;
@@ -42,14 +58,19 @@ export interface RenderedSms {
   variables?: TemplateVariables;
 }
 
-export function renderSms(event: SmsEvent): RenderedSms {
+export function renderSms(
+  event: SmsEvent,
+  draw: { expoName: string; prizePlace: string },
+): RenderedSms {
   switch (event.type) {
     case 'DRAW_RESULT':
       return {
         to: [event.phoneNumber],
         senderType: 'STANDARD',
         ...fromTemplate(DRAW_RESULT_TEMPLATE, {
+          '#{행사명}': draw.expoName,
           '#{번호}': String(event.drawNumber),
+          '#{장소}': draw.prizePlace,
         }),
       };
     case 'CUSTOM':
@@ -68,13 +89,14 @@ export function renderAuthCodeSms(code: string): TemplateMessage {
 export function renderQrSms(params: {
   expoName: string;
   links: readonly { readonly label: string; readonly url: string }[];
-  contactNumber: string;
 }): TemplateMessage {
+  const [only] = params.links;
   return fromTemplate(QR_REGISTERED_TEMPLATE, {
     '#{행사명}': params.expoName,
-    '#{QR링크}': params.links
-      .map(({ label, url }) => `${label}: ${url}`)
-      .join('\n'),
-    '#{문의번호}': params.contactNumber,
+    // 링크가 하나면 URL만, 동행자가 있으면 다음 줄부터 "이름: URL" 줄들을 넣는다.
+    '#{URL}':
+      params.links.length === 1
+        ? only.url
+        : params.links.map(({ label, url }) => `\n${label}: ${url}`).join(''),
   });
 }

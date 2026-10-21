@@ -64,9 +64,6 @@ export class QrSmsService {
           }
           return { label, url };
         }),
-        contactNumber: standard
-          ? this.config.sms.contactStandardNumber
-          : this.config.sms.contactTraineeNumber,
       });
       if (Buffer.byteLength(text, 'utf8') > 2_000) {
         throw new QrLinkError('QR SMS exceeds single LMS byte limit');
