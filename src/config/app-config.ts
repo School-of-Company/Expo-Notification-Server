@@ -114,9 +114,8 @@ const baseAppConfigSchema = z.object({
       .default(4),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),
     expoName: z.string().min(1).default('AI 미래교육 페스타'),
-    // 카카오 K2 템플릿은 문의 줄을 뺄 수 없어 필수다.
-    contactStandardNumber: z.string().min(1),
-    contactTraineeNumber: z.string().min(1),
+    // 당첨 안내(K4)의 #{장소}.
+    drawPrizePlace: z.string().min(1).default('입구 운영본부'),
     // 비어 있으면 등록 이벤트를 커밋만 하고 QR 문자를 영구히 못 보내므로 부팅에서 막는다.
     qrUrlTemplate: z.string().trim().min(1),
     traineeQrUrlTemplate: z.string().trim().min(1),

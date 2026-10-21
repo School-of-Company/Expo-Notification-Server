@@ -45,13 +45,13 @@ describe('promotion HTTP/Kafka/Redis contracts with synthetic SMS', () => {
     });
     expect(runtime.http.sms[0]?.text).toContain('[AI 미래교육 페스타]');
     expect(runtime.http.sms[0]?.text).toContain(
-      '동행자님의 프로그램 신청이 확정',
+      '동행자님, 대기 신청하신 프로그램의 참가가 확정',
     );
     expect(runtime.http.sms[0]?.text).toContain('미래 수업');
     expect(runtime.http.sms[0]?.text).toContain('10:00');
     expect(runtime.http.sms[0]?.text).toContain('장소: 추후 안내');
     expect(runtime.http.sms[0]?.text).toContain(
-      '신청 조회: 신청시스템에서 확인해 주세요',
+      '▶ 신청 확인·취소: 신청시스템에서 확인해 주세요',
     );
     expect(runtime.http.sms[0]?.text).not.toMatch(/확정 버튼/);
     expect((await runtime.store.get(first.eventId))?.status).toBe('ACCEPTED');
@@ -93,7 +93,7 @@ describe('promotion HTTP/Kafka/Redis contracts with synthetic SMS', () => {
     expect(runtime.http.sms[1]?.from).toBe('0623804587');
     expect(runtime.http.sms[1]?.text).toContain('장소: 행사장 A');
     expect(runtime.http.sms[1]?.text).toContain(
-      '신청 조회: https://expo.test/my-applications',
+      '▶ 신청 확인·취소: https://expo.test/my-applications',
     );
   });
 

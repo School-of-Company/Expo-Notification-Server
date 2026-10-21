@@ -1,3 +1,4 @@
+import { ExpoNameProvider } from '../common/expo-name.provider';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import {
   mockKakaoFetch,
@@ -43,6 +44,7 @@ describe('SmsEventService', () => {
     markUnknown: jest.Mock;
   };
   let sender: { deliver: jest.Mock };
+  let titleOf: jest.Mock<Promise<string>, [string | undefined]>;
   let service: SmsEventService;
 
   beforeEach(() => {
@@ -57,11 +59,15 @@ describe('SmsEventService', () => {
     sender = {
       deliver: jest.fn().mockResolvedValue({ kind: 'accepted', failedTo: [] }),
     };
+    titleOf = jest
+      .fn<Promise<string>, [string | undefined]>()
+      .mockResolvedValue('광주 박람회');
     service = new SmsEventService(
       config,
       new SmsEventGuard(dedupe as unknown as SmsEventDedupeStore),
       sender as unknown as SmsSenderProvider,
       new KakaoSenderProvider(config),
+      { titleOf } as unknown as ExpoNameProvider,
     );
     config.kakao = undefined;
   });
@@ -69,8 +75,17 @@ describe('SmsEventService', () => {
   afterEach(() => jest.restoreAllMocks());
 
   describe('알림톡(K4)', () => {
-    const text =
-      '축 당첨! 설문조사 행운의 숫자에 당첨되셨습니다. 선물은 입구 운영본부에서 받아가세요!\n3번!';
+    const text = [
+      '[광주 박람회] 행운의 숫자 당첨 안내',
+      '',
+      '축하합니다! 🎉',
+      "설문조사 이벤트 '행운의 숫자'에 당첨되셨습니다.",
+      '',
+      '▶ 당첨 번호: 3번',
+      '▶ 경품 수령 장소: 입구 운영본부',
+      '',
+      '※ 본 메시지는 광주 박람회 설문 참여자 중 당첨자에게 발송되었습니다.',
+    ].join('\n');
 
     it('DRAW_RESULT templateId가 있으면 문자 한 건과 카톡(disableSms: true) 한 건을 보낸다', async () => {
       config.kakao = { pfId: 'pf-1', auto: { drawResult: 'k4' } };
@@ -92,12 +107,17 @@ describe('SmsEventService', () => {
           kakaoOptions: {
             pfId: 'pf-1',
             templateId: 'k4',
-            variables: { '#{번호}': '3' },
+            variables: {
+              '#{행사명}': '광주 박람회',
+              '#{번호}': '3',
+              '#{장소}': '입구 운영본부',
+            },
             disableSms: true,
           },
           customFields: { eventId: 'e1' },
         },
       ]);
+      expect(titleOf).toHaveBeenCalledWith('expo-1');
       expect(dedupe.complete).toHaveBeenCalledWith('e1');
     });
 
@@ -163,7 +183,7 @@ describe('SmsEventService', () => {
       expect.objectContaining({
         to: '01012345678',
         from: config.sms.fromStandardNumber,
-        text: expect.stringContaining('3번!') as string,
+        text: expect.stringContaining('▶ 당첨 번호: 3번') as string,
       }),
     ]);
   });
@@ -175,6 +195,8 @@ describe('SmsEventService', () => {
       { to: '01011112222', from: config.sms.fromTraineeNumber, text: '공지' },
       { to: '01033334444', from: config.sms.fromTraineeNumber, text: '공지' },
     ]);
+    // CUSTOM은 행사명을 쓰지 않아 Expo를 조회하지 않는다.
+    expect(titleOf).toHaveBeenCalledWith(undefined);
   });
 
   it('발송에 성공하면 claim을 완료 마커로 승격한다', async () => {

@@ -10,8 +10,6 @@ const baseEnv = {
   SMS_API_SECRET: 'env-secret',
   SMS_FROM_STANDARD_NUMBER: '0623804504',
   SMS_FROM_TRAINEE_NUMBER: '0623804587',
-  SMS_CONTACT_STANDARD_NUMBER: '062-380-4504',
-  SMS_CONTACT_TRAINEE_NUMBER: '062-380-4587',
   SMS_QR_URL_TEMPLATE:
     'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
   SMS_TRAINEE_QR_URL_TEMPLATE:
@@ -84,21 +82,24 @@ describe('loadConfig', () => {
     await expect(promise).rejects.not.toThrow(/short-secret/);
   });
 
-  it('SMS 설정(행사명, 문의 번호)을 읽는다', async () => {
+  it('SMS 설정(행사명, 경품 수령 장소)을 읽는다', async () => {
     const config = await loadConfig(
-      { ...baseEnv, SMS_EXPO_NAME: '광주 박람회' },
+      {
+        ...baseEnv,
+        SMS_EXPO_NAME: '광주 박람회',
+        SMS_DRAW_PRIZE_PLACE: '본관 1층',
+      },
       jest.fn(),
     );
 
     expect(config.sms.expoName).toBe('광주 박람회');
-    expect(config.sms.contactStandardNumber).toBe('062-380-4504');
-    expect(config.sms.contactTraineeNumber).toBe('062-380-4587');
+    expect(config.sms.drawPrizePlace).toBe('본관 1층');
   });
 
-  it('문의 번호가 없으면 부팅을 실패시킨다', async () => {
-    await expect(
-      loadConfig({ ...baseEnv, SMS_CONTACT_TRAINEE_NUMBER: '' }, jest.fn()),
-    ).rejects.toThrow(/sms\.contactTraineeNumber/);
+  it('경품 수령 장소 기본값은 입구 운영본부다', async () => {
+    const config = await loadConfig(baseEnv, jest.fn());
+
+    expect(config.sms.drawPrizePlace).toBe('입구 운영본부');
   });
 
   describe('KAKAO_CONFIG_FILE', () => {
