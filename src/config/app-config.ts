@@ -40,6 +40,14 @@ const kakaoVariableMapping = z
       .string()
       .regex(/^#\{[^{}]+\}$/)
       .optional(),
+    applicationUrl: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
+    applicationSummary: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
   })
   .strict();
 
@@ -220,9 +228,19 @@ const baseAppConfigSchema = z.object({
                     message: 'approved Kakao content exceeds 1000 characters',
                   }),
                 variableMapping: kakaoVariableMapping,
+                // 모든 수신자에게 같은 값(주차장 링크 등). 키는 승인 변수명이다.
+                fixedVariables: z
+                  .record(
+                    z.string().regex(/^#\{[^{}]+\}$/),
+                    z.string().min(1).max(500),
+                  )
+                  .default({}),
               })
               .superRefine((template, context) => {
-                const mapped = Object.values(template.variableMapping);
+                const mapped = [
+                  ...Object.values(template.variableMapping),
+                  ...Object.keys(template.fixedVariables),
+                ];
                 const placeholders = [
                   ...template.content.matchAll(/#\{[^{}]+\}/g),
                 ].map((match) => match[0]);

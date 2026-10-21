@@ -12,6 +12,11 @@ export const templateVariablesSchema = z
     sessionName: z.string().max(200).optional(),
     location: z.string().max(255).optional(),
     status: z.string().max(200).optional(),
+    applicationUrl: z
+      .url({ protocol: /^https$/ })
+      .max(500)
+      .optional(),
+    applicationSummary: z.string().max(500).optional(),
   })
   .strict();
 
