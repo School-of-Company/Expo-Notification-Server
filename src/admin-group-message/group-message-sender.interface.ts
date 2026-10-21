@@ -1,4 +1,5 @@
 import type { AppConfig } from '../config/app-config';
+import type { TemplateVariables } from '../sms/kakao-message';
 import type { OutgoingKakao } from '../sms/kakao-sender.provider';
 import type { GroupMessageJob } from './admin-group-message.schema';
 
@@ -36,6 +37,26 @@ export function senderPhone(
     : config.sms.fromStandardNumber;
 }
 
+export type GroupKakaoTemplate = NonNullable<
+  NonNullable<AppConfig['adminGroupMessaging']>['kakao']
+>['templates'][number];
+
+// 승인 변수명 → 값. 받는 사람별 값(variableMapping)에 모두 같은 값(fixedVariables)을 더한다. 값이 빠지면 그 의미 이름을 돌려준다.
+export function groupTemplateVariables(
+  template: GroupKakaoTemplate,
+  values: GroupMessageTargetRecord['templateVariables'],
+): { variables: TemplateVariables } | { missing: string } {
+  const variables: TemplateVariables = { ...template.fixedVariables };
+  for (const [semanticName, providerName] of Object.entries(
+    template.variableMapping,
+  )) {
+    const value = values?.[semanticName as keyof typeof values];
+    if (value === undefined) return { missing: semanticName };
+    variables[providerName] = value;
+  }
+  return { variables };
+}
+
 // KAKAO job의 카톡 건. 문자는 같은 content로 따로 나가므로 대체 문자는 끈다. 설정·변수가 모자라면 undefined.
 export function groupKakaoMessage(
   config: AppConfig,
@@ -52,17 +73,8 @@ export function groupKakaoMessage(
     !target.content
   )
     return undefined;
-  const variables: Record<string, string> = {};
-  for (const [semanticName, providerName] of Object.entries(
-    template.variableMapping,
-  )) {
-    const value =
-      target.templateVariables?.[
-        semanticName as keyof typeof target.templateVariables
-      ];
-    if (value === undefined) return undefined;
-    variables[providerName] = value;
-  }
+  const resolved = groupTemplateVariables(template, target.templateVariables);
+  if ('missing' in resolved) return undefined;
   return {
     to: target.recipientPhone,
     from: senderPhone(config, target),
@@ -70,7 +82,7 @@ export function groupKakaoMessage(
     kakaoOptions: {
       pfId: kakao.pfId,
       templateId: template.providerTemplateId,
-      variables,
+      variables: resolved.variables,
       disableSms: true,
     },
   };

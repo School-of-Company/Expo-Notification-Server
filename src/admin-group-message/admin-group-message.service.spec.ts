@@ -9,7 +9,10 @@ import type { GroupMessageJob } from './admin-group-message.schema';
 import type { CreateGroupMessagePreview } from './admin-group-message.schema';
 import { AdminGroupMessageService } from './admin-group-message.service';
 import { AdminGroupMessageStore } from './admin-group-message.store';
-import type { GroupMessageSender } from './group-message-sender.interface';
+import type {
+  GroupKakaoTemplate,
+  GroupMessageSender,
+} from './group-message-sender.interface';
 
 describe('AdminGroupMessageService processing safety', () => {
   const target = (status: GroupMessageJob['targets'][number]['status']) => ({
@@ -45,7 +48,20 @@ describe('AdminGroupMessageService processing safety', () => {
     targets,
   });
 
-  function setup(record: GroupMessageJob, enabled = true) {
+  const nameTemplate: GroupKakaoTemplate = {
+    id: 'template',
+    name: '안내',
+    providerTemplateId: 'provider-template',
+    content: '#{이름}님 안내',
+    variableMapping: { name: '#{이름}' },
+    fixedVariables: {},
+  };
+
+  function setup(
+    record: GroupMessageJob,
+    enabled = true,
+    template: GroupKakaoTemplate = nameTemplate,
+  ) {
     const save = jest.fn().mockResolvedValue(undefined);
     const store = {
       claim: jest.fn().mockResolvedValue('lock'),
@@ -75,15 +91,7 @@ describe('AdminGroupMessageService processing safety', () => {
         kakao: {
           enabled: true,
           pfId: 'pf-id',
-          templates: [
-            {
-              id: 'template',
-              name: '안내',
-              providerTemplateId: 'provider-template',
-              content: '#{이름}님 안내',
-              variableMapping: { name: '#{이름}' },
-            },
-          ],
+          templates: [template],
         },
       },
     });
@@ -195,6 +203,55 @@ describe('AdminGroupMessageService processing safety', () => {
       },
     );
 
+    it('받는 사람별 링크·신청 내역과 고정값을 카톡 변수에 넣는다', async () => {
+      const content = '#{이름}님 #{신청내역}\nQR: #{URL}\n주차: #{주차장URL}';
+      const text =
+        '김학생님 1일차 오전\nQR: https://expo.example/qr/1\n주차: https://glink.kr/busy';
+      const record: GroupMessageJob = {
+        ...job([
+          {
+            ...target('PENDING'),
+            content: text,
+            templateVariables: {
+              name: '김학생',
+              applicationSummary: '1일차 오전',
+              applicationUrl: 'https://expo.example/qr/1',
+            },
+          },
+        ]),
+        channel: 'KAKAO',
+        templateId: 'template',
+      };
+      const { service, send } = setup(record, true, {
+        ...nameTemplate,
+        content,
+        variableMapping: {
+          name: '#{이름}',
+          applicationSummary: '#{신청내역}',
+          applicationUrl: '#{URL}',
+        },
+        fixedVariables: { '#{주차장URL}': 'https://glink.kr/busy' },
+      });
+      const fetch = mockKakaoFetch();
+
+      await service.process(record.jobId);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(sentKakaoMessages(fetch)).toMatchObject([
+        {
+          text,
+          kakaoOptions: {
+            variables: {
+              '#{이름}': '김학생',
+              '#{신청내역}': '1일차 오전',
+              '#{URL}': 'https://expo.example/qr/1',
+              '#{주차장URL}': 'https://glink.kr/busy',
+            },
+          },
+        },
+      ]);
+    });
+
     it('SMS job은 카톡을 보내지 않는다', async () => {
       const record = job([target('PENDING')]);
       const { service } = setup(record);
@@ -275,6 +332,7 @@ describe('AdminGroupMessageService processing safety', () => {
               providerTemplateId: 'provider-template',
               content: '#{이름}',
               variableMapping: { name: '#{이름}' },
+              fixedVariables: {},
             },
           ],
         },

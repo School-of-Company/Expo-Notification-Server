@@ -71,6 +71,7 @@ describe('admin group message Solapi transport', () => {
                   programName: '#{프로그램}',
                   status: '#{상태}',
                 },
+                fixedVariables: {},
               },
             ],
           },

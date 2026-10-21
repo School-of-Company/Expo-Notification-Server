@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
 import { maskPhone } from '../common/mask-phone';
+import { renderTemplate } from '../sms/kakao-message';
 import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
 import {
   type AuthorizeGroupMessage,
@@ -23,6 +24,7 @@ import {
   type GroupMessageSender,
   type GroupMessageTargetRecord,
   groupKakaoMessage,
+  groupTemplateVariables,
 } from './group-message-sender.interface';
 
 @Injectable()
@@ -53,6 +55,7 @@ export class AdminGroupMessageService {
                   name: template.name,
                   content: template.content,
                   variableMapping: template.variableMapping,
+                  fixedVariables: template.fixedVariables,
                   variables: Object.keys(template.variableMapping),
                 }))
               : [],
@@ -273,18 +276,11 @@ export class AdminGroupMessageService {
       !target.content
     )
       return false;
-    let rendered = template.content;
-    for (const [semanticName, providerName] of Object.entries(
-      template.variableMapping,
-    )) {
-      const value =
-        target.templateVariables?.[
-          semanticName as keyof typeof target.templateVariables
-        ];
-      if (value === undefined) return false;
-      rendered = rendered.replaceAll(providerName, value);
-    }
-    return rendered === target.content;
+    const resolved = groupTemplateVariables(template, target.templateVariables);
+    if ('missing' in resolved) return false;
+    return (
+      renderTemplate(template.content, resolved.variables) === target.content
+    );
   }
 
   private async refreshPendingAuthorization(jobId: string): Promise<void> {
@@ -341,21 +337,17 @@ export class AdminGroupMessageService {
       );
     for (const target of input.targets) {
       if (target.missingReason) continue;
-      let rendered = template.content;
-      for (const [semanticName, providerName] of Object.entries(
-        template.variableMapping,
-      )) {
-        const value =
-          target.templateVariables?.[
-            semanticName as keyof typeof target.templateVariables
-          ];
-        if (value === undefined)
-          throw new UnprocessableEntityException(
-            `missing Kakao variable: ${semanticName}`,
-          );
-        rendered = rendered.replaceAll(providerName, value);
-      }
-      if (rendered !== target.content)
+      const resolved = groupTemplateVariables(
+        template,
+        target.templateVariables,
+      );
+      if ('missing' in resolved)
+        throw new UnprocessableEntityException(
+          `missing Kakao variable: ${resolved.missing}`,
+        );
+      if (
+        renderTemplate(template.content, resolved.variables) !== target.content
+      )
         throw new UnprocessableEntityException(
           'rendered Kakao content does not match approved template',
         );
