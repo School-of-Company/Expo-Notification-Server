@@ -26,7 +26,7 @@ export function promotionMessage(
     '#{프로그램}': check.programName,
     '#{일시}': `${dateTime.format(new Date(check.startedAt))} ~ ${dateTime.format(new Date(check.endedAt))} (한국시간)`,
     '#{장소}': check.location ?? '추후 안내',
-    '#{신청조회}': check.applicationLookupUrl ?? '신청시스템에서 확인해 주세요',
+    '#{URL}': check.applicationLookupUrl ?? '신청시스템에서 확인해 주세요',
   };
   return { text: renderTemplate(PROMOTION_TEMPLATE, variables), variables };
 }

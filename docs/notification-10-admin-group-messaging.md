@@ -25,7 +25,7 @@ participant별 target과 렌더링 문구를 유지하며 같은 번호라는 �
 소문자 SHA-256 64 hex다. optional 필드는 JSON `null` 대신 생략한다.
 
 - `GET /config` (200): SMS/Kakao 사용 가능 여부와 승인 Kakao template의 `id`, `name`, `content`,
-  `variableMapping`, 의미 변수 목록을 반환한다. 공급자 profile/template ID는 반환하지 않는다.
+  `variableMapping`, `fixedVariables`, 의미 변수 목록을 반환한다. 공급자 profile/template ID는 반환하지 않는다.
 - `POST /previews` (201): requester/expo/requestId/applicationCount/fingerprint/channel/targets를 저장한다.
   같은 requestId와 같은 body는 같은 preview를 반환하고 다른 body는 409다.
 - `POST /previews/{previewId}/jobs` (202): requester/expo/fingerprint/idempotencyKey를 다시 받고 job을
@@ -41,7 +41,8 @@ participant별 target과 렌더링 문구를 유지하며 같은 번호라는 �
 
 미리보기 target은 최대 5,000건이다. 발송 가능한 target에는 `targetId`, `applicationId`, optional
 `participantId`, `programType`, `recipientPhone`, `content`가 필요하다. Kakao만 optional
-`templateVariables`를 받는다. 현재 의미 이름은 `expoName`, `name`, `programName`, `sessionName`, `location`, `status`이다.
+`templateVariables`를 받는다. 현재 의미 이름은 `expoName`, `name`, `programName`, `sessionName`, `location`, `status`,
+`applicationUrl`(받는 사람별 QR 페이지 링크, https만, 500자 이하), `applicationSummary`(받는 사람별 신청 내역 여러 줄, 500자 이하)이다.
 이 이름은 Application/Client와 승인 template을 연결하는 최소 계약이며 최종 문구나 필수 변수 정책을
 임의로 고정하지 않는다.
 
@@ -73,8 +74,22 @@ KAKAO 채널은 **카톡과 문자를 항상 둘 다** 보낸다. target마다 �
 `adminGroupMessaging.kakao`가
 없거나 disabled이면 config가 `KAKAO.enabled=false`, `templates=[]`를 반환하고 Kakao preview는 422다.
 template 설정은 Solapi `pfId`, 승인 template ID/content, 의미 이름에서 실제 승인 변수 이름
-(`#{승인변수명}`)으로 가는 명시적 mapping을 포함한다. preview의 렌더링 문구가 설정된 승인 content를
-해당 변수로 치환한 결과와 정확히 같아야 한다. 실제 승인 template/프로필 설정과 운영 연결은 #28 범위다.
+(`#{승인변수명}`)으로 가는 명시적 mapping을 포함한다. 모든 수신자에게 같은 값(주차장 링크 등)은 선택 필드
+`fixedVariables`(승인 변수명 → 값, 값은 500자 이하)에 둔다. 없으면 `{}`로 읽어 기존 template도 그대로 동작한다.
+`variableMapping` 값과 `fixedVariables` 키는 겹치면 안 되고, 합집합이 승인 content의 placeholder와 정확히 같아야
+부팅이 통과한다. preview의 렌더링 문구가 설정된 승인 content를 받는 사람 변수와 고정값으로 치환한 결과와 정확히 같아야 하고,
+카톡 `variables`에도 고정값이 함께 들어간다. 실제 승인 template/프로필 설정과 운영 연결은 #28 범위다.
+
+```json
+{
+  "id": "participation-guide",
+  "name": "2026 AI미래교육박람회 참가 안내",
+  "providerTemplateId": "<승인 template ID>",
+  "content": "<카카오 승인 본문 그대로: ... #{URL} ... #{주차장URL} ...>",
+  "variableMapping": { "applicationUrl": "#{URL}" },
+  "fixedVariables": { "#{주차장URL}": "https://glink.kr/busy" }
+}
+```
 
 Solapi 전송은 message(문자·카톡 각각)마다 `fetch` 한 번만 호출한다. SDK나 애플리케이션 수준의 묵시적 retry는 없고,
 SMS는 UTF-8 2,000 bytes, Kakao 승인 본문 치환 결과는 Unicode 1,000 characters 이하여야 한다.

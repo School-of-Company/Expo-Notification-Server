@@ -40,6 +40,14 @@ const kakaoVariableMapping = z
       .string()
       .regex(/^#\{[^{}]+\}$/)
       .optional(),
+    applicationUrl: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
+    applicationSummary: z
+      .string()
+      .regex(/^#\{[^{}]+\}$/)
+      .optional(),
   })
   .strict();
 
@@ -114,9 +122,8 @@ const baseAppConfigSchema = z.object({
       .default(4),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),
     expoName: z.string().min(1).default('AI 미래교육 페스타'),
-    // 카카오 K2 템플릿은 문의 줄을 뺄 수 없어 필수다.
-    contactStandardNumber: z.string().min(1),
-    contactTraineeNumber: z.string().min(1),
+    // 당첨 안내(K4)의 #{장소}.
+    drawPrizePlace: z.string().min(1).default('입구 운영본부'),
     // 비어 있으면 등록 이벤트를 커밋만 하고 QR 문자를 영구히 못 보내므로 부팅에서 막는다.
     qrUrlTemplate: z.string().trim().min(1),
     traineeQrUrlTemplate: z.string().trim().min(1),
@@ -220,9 +227,19 @@ const baseAppConfigSchema = z.object({
                     message: 'approved Kakao content exceeds 1000 characters',
                   }),
                 variableMapping: kakaoVariableMapping,
+                // 모든 수신자에게 같은 값(주차장 링크 등). 키는 승인 변수명이다.
+                fixedVariables: z
+                  .record(
+                    z.string().regex(/^#\{[^{}]+\}$/),
+                    z.string().min(1).max(500),
+                  )
+                  .default({}),
               })
               .superRefine((template, context) => {
-                const mapped = Object.values(template.variableMapping);
+                const mapped = [
+                  ...Object.values(template.variableMapping),
+                  ...Object.keys(template.fixedVariables),
+                ];
                 const placeholders = [
                   ...template.content.matchAll(/#\{[^{}]+\}/g),
                 ].map((match) => match[0]);

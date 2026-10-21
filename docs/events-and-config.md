@@ -15,12 +15,12 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 
 1. `eventId` 선점 (이미 끝낸 이벤트면 문자는 건너뛰고 발행만 이어서 시도. 다른 곳에서 처리 중이면 버리지 않고 던져서, 선점이 풀린 뒤 다시 받는다)
 2. 이벤트 목록만큼 프론트 `/qr` 링크를 만들고, STANDARD는 User `POST /internal/standard-participants/names`로 이름을 한 번 조회한다 (`X-Internal-Token`)
-3. 대표자 번호로 줄바꿈한 링크들을 한 통 발송한다 (일반/연수 발신번호와 문의 번호는 기존 설정 사용)
+3. 대표자 번호로 한 통 발송한다 (일반/연수 발신번호는 기존 설정 사용). 링크가 하나면 `#{URL}`에 URL만, 동행자가 있으면 줄바꿈 하나 뒤에 `이름: 링크` 줄들을 넣어 다음 줄부터 시작하게 한다
 4. 완료 마커로 승격하고, **일반 참가자만** `notification.qr-sms.sent` 이벤트를 발행
 
 `participants`는 이번 문자 대상(1~5명)이다. 새 동행자 추가는 새 동행자만, 재발송은 기존 전체다. 대표자는 `representativeId ?? id`로 판별하고 존재할 때만 먼저 표시한다. 나머지는 이벤트 순서를 유지하며 목록에 없는 대표자를 추가하지 않는다. 완료 이벤트의 `id`도 `representativeId ?? id`다.
 
-이름은 이벤트에서 읽지 않는다. 이름 조회 요청은 `{expoId, participantIds}`, 응답은 요청 순서대로 `[{participantId,name}]`다. 이름이 있으면 `이름(대표자): 링크` / `이름: 링크`, 없으면 `대표자: 링크` / `동행자 1: 링크`를 사용한다. 이름 API 미설정, 404/401/5xx, 연결/JSON 실패, 잘못된 ID/순서/이름 응답은 전체 이름을 역할 라벨로 대체하고 발송을 계속한다. 선택 조회가 발송을 오래 막지 않게 공통 HTTP 기본 10초 대신 2초 timeout을 적용한다. 이름/전화번호/code/완성 링크나 원문 응답/오류는 QR 처리 로그에 남기지 않는다.
+이름은 이벤트에서 읽지 않는다. 이름 조회 요청은 `{expoId, participantIds}`, 응답은 요청 순서대로 `[{participantId,name}]`다. 링크가 둘 이상일 때 이름이 있으면 `이름(대표자): 링크` / `이름: 링크`, 없으면 `대표자: 링크` / `동행자 1: 링크`를 사용한다. 이름 API 미설정, 404/401/5xx, 연결/JSON 실패, 잘못된 ID/순서/이름 응답은 전체 이름을 역할 라벨로 대체하고 발송을 계속한다. 선택 조회가 발송을 오래 막지 않게 공통 HTTP 기본 10초 대신 2초 timeout을 적용한다. 이름/전화번호/code/완성 링크나 원문 응답/오류는 QR 처리 로그에 남기지 않는다.
 
 ### QR 링크 설정과 미발송 정책
 
@@ -35,7 +35,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 - code 형식 오류/중복 ID/빈 목록/6명 이상/잘못된 ID 등 스키마 오류는 기존 소비 정책대로 로그 후 건너뛰며 미발송한다. 원본을 복구하려면 운영 원본 이벤트 보관이 필요하다.
 - 구버전 STANDARD 이벤트에 code/목록이 없으면 번호로 QR를 생성하거나 code를 추측하지 않는다. 현재 User resolve API는 ID만 반환하고 names API도 code를 반환하지 않는다. User에서 현재 저장된 QR로 새 등록/재발송 이벤트를 생산하거나, 원본 outbox 목록이 있는 경우 공급자가 복구한 이벤트를 재생해야 한다. 구버전의 `done-v2`는 이미 발송한 문자이므로 완료 발행만 이어가고 `done`은 모두 건너뛴다.
 
-[Solapi 공식 발송 계약](https://solapi.com/developers/api/messages)에 따르면 `autoTypeDetect` 기본값은 true이고 type 생략 시 90바이트 초과는 LMS(2,000바이트 상한)로 전환된다. 설치 SDK 6.0.1의 `send`는 타입을 생략한 메시지를 `messages/v4/send-many/detail`에 그대로 전달한다. QR 본문의 UTF-8 크기를 보수적으로 2,000바이트 이하로 제한하며 초과 시 나누어 보내지 않는다. 한글은 통신사 기준 2바이트지만 UTF-8에서는 3바이트여서 실제 LMS에 들어갈 일부 긴 본문도 미발송될 수 있다. 운영 Client 도메인/행사명/문의번호를 반영한 5명 본문으로 최종 길이를 확인해야 한다.
+[Solapi 공식 발송 계약](https://solapi.com/developers/api/messages)에 따르면 `autoTypeDetect` 기본값은 true이고 type 생략 시 90바이트 초과는 LMS(2,000바이트 상한)로 전환된다. 설치 SDK 6.0.1의 `send`는 타입을 생략한 메시지를 `messages/v4/send-many/detail`에 그대로 전달한다. QR 본문의 UTF-8 크기를 보수적으로 2,000바이트 이하로 제한하며 초과 시 나누어 보내지 않는다. 한글은 통신사 기준 2바이트지만 UTF-8에서는 3바이트여서 실제 LMS에 들어갈 일부 긴 본문도 미발송될 수 있다. 운영 Client 도메인/행사명을 반영한 5명 본문으로 최종 길이를 확인해야 한다.
 
 ### `notification.qr-sms.sent` — QR 문자 발송 완료 (알림 서버 발행, User 소비)
 
@@ -63,7 +63,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 
 | type | 필드 | 설명 |
 |---|---|---|
-| `DRAW_RESULT` | `phoneNumber`, `drawNumber`, 선택 `expoId` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정). `expoId`는 받기만 하고 아직 쓰지 않는다(K4 문구에 행사명이 없음) |
+| `DRAW_RESULT` | `phoneNumber`, `drawNumber`, 선택 `expoId` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정). `#{행사명}`은 `expoId`로 조회한다(아래 `#{행사명}` 규칙). `#{장소}`는 `sms.drawPrizePlace` |
 | `CUSTOM` | `phoneNumbers[1..1000]`, `senderType`, `text` | 본문을 호출 측이 만든 일반/대량 문자 (연수 일정 안내 포함) |
 
 완료 시점부터 7일 동안 `done-v2` 마커가 남아 있으면 같은 `eventId`의 문자 재발송을 억제한다. 발송 결과는 세 가지로 나눈다(아래 **접수 결과 불명(UNKNOWN)** 참고).
@@ -211,8 +211,7 @@ sms:                                   # 비밀 값은 Vault
   authCodeLength: 4                    # 4 또는 6. User·클라이언트가 6자리를 받게 된 뒤 6으로 올린다
   eventMaxAttempts: 5
   authMaxVerifyAttemptCount: 5
-  contactStandardNumber: "…"           # 필수, QR 문자의 (문의) 줄
-  contactTraineeNumber: "…"            # 필수
+  drawPrizePlace: "입구 운영본부"        # 당첨 안내(K4)의 #{장소}, env SMS_DRAW_PRIZE_PLACE
   qrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&code={code}"   # 필수
   traineeQrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}"   # 필수
 user:                                  # 이름 조회, 통째로 생략하면 역할 라벨
@@ -242,6 +241,11 @@ JSON 객체가 아니면 경로만 담은 에러로 부팅을 실패시킨다. �
 - 성공·실패는 문자 기준으로 판정한다(인증번호 502, Kafka 재전달, 승급 원장 상태). 카톡 실패·결과 불명은 마스킹한 번호로
   경고 로그만 남기고 재전달·재시도하지 않는다. 문자가 실패하면 카톡은 보내지 않아서, 재전달 때 카톡이 쌓이지 않는다.
 - 본문이 알림톡 한도(1,000자)를 넘는 QR·승급 메시지는 카톡은 빼고 문자로만 보낸다.
+- K2~K4는 2026-10-20 승인된 템플릿 문구를 쓴다(#100). 운영 `kakao.json`의 `kakao.auto`에 넣을 ID:
+  `qrRegistered` `KA01TP261019134427485yO0YlAylHCw`(등록 완료(사본)), `promotion` `KA01TP261019134636962s43R93KqIrL`
+  (프로그램 참가 확정(대기>확정)), `drawResult` `KA01TP2610191348346825L8GEuatIMW`(설문 추첨 당첨).
+  QR의 문의번호 줄은 승인 본문에 없어 뺐고 `sms.contactStandardNumber`·`sms.contactTraineeNumber` 설정도 없앴다.
+  승급의 신청 확인 링크 변수는 `#{URL}`(값은 `applicationLookupUrl`)이다.
 - K1 인증번호는 이미 승인된 템플릿 문구를 쓴다. 행사명이 고정이고 `#{인증번호}`만 바꾸며, 문구의 "5분"에 맞춰 `authCodeTtlSeconds` 기본값이 300이다.
   `POST /sms`의 `expoId`는 받기만 한다.
 - `#{행사명}`은 이벤트의 박람회 제목이다. Expo `GET /internal/expo` 목록을 10분 캐시해서

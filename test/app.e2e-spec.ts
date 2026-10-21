@@ -349,7 +349,7 @@ describe('Notification server (e2e)', () => {
       await emit(config.kafka.smsGroupId, drawResult);
 
       expect(solapiSend).toHaveBeenCalledTimes(1);
-      expect(sentBatches()[0][0][0].text).toContain('9번!');
+      expect(sentBatches()[0][0][0].text).toContain('▶ 당첨 번호: 9번');
     });
 
     it('발송이 전부 실패하면 던지고, 재전달되면 다시 발송을 시도한다', async () => {
@@ -431,7 +431,7 @@ describe('Notification server (e2e)', () => {
         to: '01012345678',
         from: config.sms.fromStandardNumber,
         text: expect.stringContaining(
-          '홍길동(대표자): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=',
+          '▶ 신청 확인(QR확인): https://expo.test/qr?expoId=expo-1&type=STANDARD&id=42&code=',
         ) as string,
       });
       expect(sentEvents()).toEqual([
@@ -459,7 +459,10 @@ describe('Notification server (e2e)', () => {
 
     it('User 이름 조회 404는 fallback 문자를 계속 발송한다', async () => {
       fetchSpy.mockResolvedValueOnce({ ok: false, status: 404 });
-      await emit(registeredGroup, registered);
+      await emit(registeredGroup, {
+        ...registered,
+        participants: [42, 43].map((id) => ({ id, code: 'a'.repeat(22) })),
+      });
       expect(sentBatches()[0][0][0].text).toContain('대표자:');
       expect(sentEvents()).toHaveLength(1);
     });

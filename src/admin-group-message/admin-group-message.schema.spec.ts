@@ -73,6 +73,30 @@ describe('createGroupMessagePreviewSchema', () => {
     expect(withVariables('가'.repeat(200))).toBe(true);
     expect(withVariables('가'.repeat(201))).toBe(false);
   });
+
+  it('applicationUrl은 500자 이하 https만, applicationSummary는 500자까지 받는다', () => {
+    const withVariables = (templateVariables: Record<string, string>) =>
+      createGroupMessagePreviewSchema.safeParse(
+        preview({
+          targets: [{ ...preview({}).targets[0], templateVariables }],
+        }),
+      ).success;
+    const url = 'https://expo.example/qr/';
+
+    expect(
+      withVariables({
+        applicationUrl: url + 'a'.repeat(500 - url.length),
+        applicationSummary: '가\n'.repeat(250),
+      }),
+    ).toBe(true);
+    expect(
+      withVariables({ applicationUrl: url + 'a'.repeat(501 - url.length) }),
+    ).toBe(false);
+    expect(withVariables({ applicationUrl: 'http://expo.example/qr/1' })).toBe(
+      false,
+    );
+    expect(withVariables({ applicationSummary: '가'.repeat(501) })).toBe(false);
+  });
 });
 
 describe('groupMessageJobSchema', () => {
