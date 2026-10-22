@@ -41,6 +41,7 @@ export class AdminGroupMessageService {
     const kakao = settings?.kakao;
     return {
       enabled: settings?.enabled === true,
+      targetContracts: ['PREREGISTRATION_GROUP_MESSAGE_V1'],
       channels: {
         SMS: { enabled: settings?.enabled === true },
         KAKAO: {
@@ -435,6 +436,7 @@ export class AdminGroupMessageService {
       expiresAt: preview.expiresAt,
       items: preview.targets.map((target) => ({
         targetId: target.targetId,
+        ledgerKey: target.ledgerKey,
         applicationId: target.applicationId,
         participantId: target.participantId,
         recipientMasked: target.recipientPhone
@@ -467,6 +469,7 @@ export class AdminGroupMessageService {
       },
       items: job.targets.map((target) => ({
         targetId: target.targetId,
+        ledgerKey: target.ledgerKey,
         applicationId: target.applicationId,
         participantId: target.participantId,
         recipientMasked: target.recipientPhone

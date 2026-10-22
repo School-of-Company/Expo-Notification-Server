@@ -86,6 +86,7 @@ const historyResponseSchema = {
                 type: 'array',
                 items: { type: 'string', enum: ['STANDARD', 'TRAINING'] },
               },
+              source: { type: 'string', enum: ['PREREGISTRATION'] },
             },
           },
           counts: {
