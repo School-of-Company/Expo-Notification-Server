@@ -88,6 +88,15 @@ function configFromEnv(env: Env): Record<string, unknown> {
       traineeQrUrlTemplate: env.SMS_TRAINEE_QR_URL_TEMPLATE,
       authMaxVerifyAttemptCount: env.SMS_AUTH_MAX_VERIFY_ATTEMPT_COUNT,
       apiBaseUrl: env.SMS_API_BASE_URL,
+      ...((env.SMS_APPLICATION_RESULT_EXPO_IDS ||
+        env.SMS_APPLICATION_RESULT_MAX_AGE_SECONDS) && {
+        applicationResult: pickDefined({
+          expoIds: env.SMS_APPLICATION_RESULT_EXPO_IDS?.split(',')
+            .map((id) => id.trim())
+            .filter(Boolean),
+          maxAgeSeconds: env.SMS_APPLICATION_RESULT_MAX_AGE_SECONDS,
+        }),
+      }),
     }),
     ...((env.USER_SERVICE_URL || env.USER_SERVICE_INTERNAL_TOKEN) && {
       user: pickDefined({

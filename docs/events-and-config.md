@@ -65,6 +65,7 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 |---|---|---|
 | `DRAW_RESULT` | `phoneNumber`, `drawNumber`, 선택 `expoId` | 설문 행운 번호 당첨 (일반 참가자 발신번호 고정). `#{행사명}`은 `expoId`로 조회한다(아래 `#{행사명}` 규칙). `#{장소}`는 `sms.drawPrizePlace` |
 | `CUSTOM` | `phoneNumbers[1..1000]`, `senderType`, `text` | 본문을 호출 측이 만든 일반/대량 문자 (연수 일정 안내 포함) |
+| `PROGRAM_CONFIRMED` `PROGRAM_WAITLISTED` `PROGRAM_CANCELLED` `PREREGISTER_CANCELLED` `PREREGISTER_SESSION_ADDED` `OFFER_EXPIRED` | `phoneNumber`(대표자), `expoId`, `occurredAt`, `items[1..10]` 등 | Application 신청 결과 문자 (#110). 계약·설정은 [notification-110-application-result-sms.md](notification-110-application-result-sms.md) |
 
 완료 시점부터 7일 동안 `done-v2` 마커가 남아 있으면 같은 `eventId`의 문자 재발송을 억제한다. 발송 결과는 세 가지로 나눈다(아래 **접수 결과 불명(UNKNOWN)** 참고).
 - 명시적 거부(공급자가 한 건도 접수하지 않음): consumer가 던져 Kafka가 재전달하고, `sms.eventMaxAttempts`번 실패하면 DLQ로 옮긴다.

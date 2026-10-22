@@ -1,4 +1,5 @@
 import { renderTemplate, TemplateVariables } from './kakao-message';
+import { renderApplicationResult } from './application-result-message';
 import { SenderType, SmsEvent } from './sms-event.schema';
 
 // 알림톡 템플릿 본문이자 문자 본문이다. 카카오 승인 본문과 글자 하나까지 같아야 한다.
@@ -78,6 +79,13 @@ export function renderSms(
         to: event.phoneNumbers,
         senderType: event.senderType,
         text: event.text,
+      };
+    default:
+      // 승인된 알림톡 템플릿이 없어 variables를 돌려주지 않는다. 문자로만 나간다.
+      return {
+        to: [event.phoneNumber],
+        senderType: event.senderType,
+        text: renderApplicationResult(event, draw.expoName).text,
       };
   }
 }

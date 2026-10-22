@@ -74,6 +74,124 @@ describe('SmsEventService', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
+  describe('신청 결과 문자(#110)', () => {
+    const result: SmsEvent = {
+      eventId: 'r1',
+      version: 1,
+      type: 'PROGRAM_CONFIRMED',
+      phoneNumber: '01012345678',
+      expoId: 'expo-1',
+      senderType: 'TRAINEE',
+      occurredAt: new Date().toISOString(),
+      items: [{ participantName: '홍길동', title: 'AI 코딩 체험' }],
+    };
+
+    it('대표자 번호로 유형 문구를 해당 발신번호로 보낸다', async () => {
+      await service.handle(result);
+
+      expect(titleOf).toHaveBeenCalledWith('expo-1');
+      expect(sender.deliver).toHaveBeenCalledTimes(1);
+      const [eventId, messages] = sender.deliver.mock.calls[0] as [
+        string,
+        { to: string; from: string; text: string }[],
+      ];
+      expect(eventId).toBe('r1');
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({
+        to: '01012345678',
+        from: config.sms.fromTraineeNumber,
+      });
+      expect(messages[0].text).toContain(
+        '[광주 박람회] 프로그램 신청 확정 안내',
+      );
+    });
+
+    it('알림톡 설정이 있어도 문자로만 보낸다', async () => {
+      config.kakao = {
+        pfId: 'pf',
+        auto: { drawResult: 'tpl' },
+      };
+      const fetchMock = mockKakaoFetch();
+
+      await service.handle(result);
+
+      expect(sentKakaoMessages(fetchMock)).toHaveLength(0);
+    });
+
+    it('같은 eventId가 이미 끝났으면 다시 보내지 않는다', async () => {
+      dedupe.claim.mockResolvedValue('done');
+
+      await service.handle(result);
+
+      expect(sender.deliver).not.toHaveBeenCalled();
+    });
+
+    it('접수 결과 불명이면 던지고 자동 재발송하지 않는다', async () => {
+      sender.deliver.mockResolvedValue({ kind: 'unknown' });
+
+      await expect(service.handle(result)).rejects.toBeInstanceOf(
+        SmsDeliveryUnknownError,
+      );
+      expect(dedupe.release).not.toHaveBeenCalled();
+    });
+
+    it('공급자가 거절하면 선점을 풀고 던진다', async () => {
+      sender.deliver.mockResolvedValue({ kind: 'rejected', code: 'X' });
+
+      await expect(service.handle(result)).rejects.toBeInstanceOf(
+        SmsDeliveryRejectedError,
+      );
+      expect(dedupe.release).toHaveBeenCalledWith('r1');
+    });
+
+    it('허용 박람회가 아니면 선점도 발송도 하지 않는다', async () => {
+      config.sms.applicationResult = {
+        expoIds: ['test-expo'],
+        maxAgeSeconds: 60,
+      };
+
+      await service.handle(result);
+
+      expect(dedupe.claim).not.toHaveBeenCalled();
+      expect(sender.deliver).not.toHaveBeenCalled();
+      config.sms.applicationResult = { maxAgeSeconds: 86_400 };
+    });
+
+    it('허용 박람회면 보낸다', async () => {
+      config.sms.applicationResult = { expoIds: ['expo-1'], maxAgeSeconds: 60 };
+
+      await service.handle(result);
+
+      expect(sender.deliver).toHaveBeenCalledTimes(1);
+      config.sms.applicationResult = { maxAgeSeconds: 86_400 };
+    });
+
+    it('본문이 2000바이트를 넘으면 보내지 않고 재시도하지 않는다', async () => {
+      const long = '가'.repeat(100);
+
+      await service.handle({
+        ...result,
+        items: Array.from({ length: 10 }, () => ({
+          participantName: long,
+          title: long,
+          location: long,
+        })),
+      });
+
+      expect(sender.deliver).not.toHaveBeenCalled();
+      expect(dedupe.complete).toHaveBeenCalledWith('r1');
+    });
+
+    it('오래된 이벤트는 소급 발송하지 않는다', async () => {
+      await service.handle({
+        ...result,
+        occurredAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      });
+
+      expect(sender.deliver).not.toHaveBeenCalled();
+    });
+  });
+
   describe('알림톡(K4)', () => {
     const text = [
       '[광주 박람회] 행운의 숫자 당첨 안내',

@@ -30,6 +30,7 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       eventMaxAttempts: 5,
       expoName: '광주 박람회',
       drawPrizePlace: '입구 운영본부',
+      applicationResult: { maxAgeSeconds: 86_400 },
       qrUrlTemplate:
         'https://expo.test/qr?expoId={expoId}&type={participationType}&id={id}&code={code}',
       traineeQrUrlTemplate:
