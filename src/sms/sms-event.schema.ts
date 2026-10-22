@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { expoIdSchema } from '../common/expo-name.provider';
+import { applicationResultEventSchema } from './application-result.schema';
 
 const phoneNumber = z.string().regex(/^01\d{8,9}$/);
 const senderType = z.enum(['STANDARD', 'TRAINEE']);
@@ -25,6 +26,8 @@ export const smsEventSchema = z.discriminatedUnion('type', [
     senderType,
     text: z.string().min(1).max(2000),
   }),
+  // Application의 신청·취소·회차 추가·참여 확인 만료 결과 (#110). 필드는 application-result.schema.ts.
+  ...applicationResultEventSchema.options,
 ]);
 
 export type SmsEvent = z.infer<typeof smsEventSchema>;
