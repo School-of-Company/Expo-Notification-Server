@@ -14,6 +14,9 @@ import { SmsEventGuard } from './sms-event.guard';
 import { renderSms } from './sms-message.templates';
 import { SmsSenderProvider } from './sms-sender.provider';
 
+// Solapi 장문(LMS) 본문 상한.
+const MAX_TEXT_BYTES = 2000;
+
 @Injectable()
 export class SmsEventService {
   private readonly logger = new Logger(SmsEventService.name);
@@ -27,11 +30,12 @@ export class SmsEventService {
   ) {}
 
   async handle(event: SmsEvent): Promise<void> {
+    if (!this.shouldSend(event)) return;
     await this.guard.once(event.eventId, async (beginSend) => {
       const { to, senderType, text, variables } = renderSms(event, {
         // CUSTOM은 행사명을 쓰지 않아 조회하지 않는다(expoId 없이 부르면 기본 행사명만 돌려준다).
         expoName: await this.expoNames.titleOf(
-          event.type === 'DRAW_RESULT' ? event.expoId : undefined,
+          event.type === 'CUSTOM' ? undefined : event.expoId,
         ),
         prizePlace: this.config.sms.drawPrizePlace,
       });
@@ -47,6 +51,18 @@ export class SmsEventService {
         senderType === 'TRAINEE'
           ? this.config.sms.fromTraineeNumber
           : this.config.sms.fromStandardNumber;
+
+      // 장문(LMS) 상한을 넘는 본문은 다시 받아도 같아 재시도하지 않는다. 완료 처리하고 운영 확인용 로그만 남긴다.
+      if (
+        event.type !== 'DRAW_RESULT' &&
+        event.type !== 'CUSTOM' &&
+        Buffer.byteLength(text, 'utf8') > MAX_TEXT_BYTES
+      ) {
+        this.logger.error(
+          `신청 결과 문자 본문이 ${MAX_TEXT_BYTES}바이트를 넘어 발송하지 않음: eventId=${event.eventId}, type=${event.type}`,
+        );
+        return;
+      }
 
       const messages = to.map((recipient) => ({ to: recipient, from, text }));
 
@@ -76,5 +92,25 @@ export class SmsEventService {
         );
       }
     });
+  }
+
+  // Application 신청 결과(#110)만 대상이다. 허용 박람회가 아니거나 오래된 이벤트는 보내지 않고 끝낸다.
+  // 건너뛰어도 선점하지 않으므로 나중에 허용 목록을 넓혀 같은 이벤트가 다시 와도 막히지 않는다.
+  private shouldSend(event: SmsEvent): boolean {
+    if (event.type === 'DRAW_RESULT' || event.type === 'CUSTOM') return true;
+    const { expoIds, maxAgeSeconds } = this.config.sms.applicationResult;
+    if (expoIds && !expoIds.includes(event.expoId)) {
+      this.logger.log(
+        `허용되지 않은 박람회의 신청 결과 문자 건너뜀: eventId=${event.eventId}, type=${event.type}`,
+      );
+      return false;
+    }
+    if (Date.now() - Date.parse(event.occurredAt) > maxAgeSeconds * 1000) {
+      this.logger.warn(
+        `오래된 신청 결과 이벤트라 소급 발송하지 않음: eventId=${event.eventId}, type=${event.type}`,
+      );
+      return false;
+    }
+    return true;
   }
 }

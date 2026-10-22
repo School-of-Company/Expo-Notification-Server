@@ -124,6 +124,14 @@ const baseAppConfigSchema = z.object({
     expoName: z.string().min(1).default('AI 미래교육 페스타'),
     // 당첨 안내(K4)의 #{장소}.
     drawPrizePlace: z.string().min(1).default('입구 운영본부'),
+    // Application 신청 결과 문자(#110). expoIds가 있으면 그 박람회만 보낸다(테스트 박람회 한정 검증). 없으면 전체.
+    // maxAgeSeconds보다 오래된 이벤트는 소급 발송하지 않고 버린다.
+    applicationResult: z
+      .object({
+        expoIds: z.array(z.string().min(1)).min(1).optional(),
+        maxAgeSeconds: z.coerce.number().int().positive().default(86_400),
+      })
+      .prefault({}),
     // 비어 있으면 등록 이벤트를 커밋만 하고 QR 문자를 영구히 못 보내므로 부팅에서 막는다.
     qrUrlTemplate: z.string().trim().min(1),
     traineeQrUrlTemplate: z.string().trim().min(1),
