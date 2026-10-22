@@ -39,12 +39,16 @@ participant별 target과 렌더링 문구를 유지하며 같은 번호라는 �
   401이다. Application 매 페이지 현재 JWT/행사 권한 검증과 후속 공개 API 접합 요구는
   [#42 이력 계약](notification-42-admin-message-history.md)을 따른다.
 
-미리보기 target은 최대 5,000건이다. 발송 가능한 target에는 `targetId`, `applicationId`, optional
+미리보기 target은 최대 5,000건이다. 기존 프로그램의 발송 가능한 target에는 `targetId`, `applicationId`, optional
 `participantId`, `programType`, `recipientPhone`, `content`가 필요하다. Kakao만 optional
 `templateVariables`를 받는다. 현재 의미 이름은 `expoName`, `name`, `programName`, `sessionName`, `location`, `status`,
 `applicationUrl`(받는 사람별 QR 페이지 링크, https만, 500자 이하), `applicationSummary`(받는 사람별 신청 내역 여러 줄, 500자 이하)이다.
 이 이름은 Application/Client와 승인 template을 연결하는 최소 계약이며 최종 문구나 필수 변수 정책을
 임의로 고정하지 않는다.
+
+사전등록 target은 [#106 계약](notification-106-preregistration-group-message.md)을 따른다.
+`GET /config`의 `targetContracts`는 `PREREGISTRATION_GROUP_MESSAGE_V1`을 포함한다.
+이는 구현 지원 선언이며 발송 가능 여부는 별도 `enabled`와 채널 설정으로 확인한다.
 
 preview count는 원본 신청 행 수 `applicationCount`, 고유 수신 번호 수 `recipientCount`, 실제 outgoing
 target 수 `messageCount`/`sendableCount`, 누락 target 수 `missingCount`를 분리한다. 개인 치환에서는 한
@@ -94,7 +98,7 @@ template 설정은 Solapi `pfId`, 승인 template ID/content, 의미 이름에�
 Solapi 전송은 message(문자·카톡 각각)마다 `fetch` 한 번만 호출한다. SDK나 애플리케이션 수준의 묵시적 retry는 없고,
 SMS는 UTF-8 2,000 bytes, Kakao 승인 본문 치환 결과는 Unicode 1,000 characters 이하여야 한다.
 표준/연수 발신번호는 target `programType`과 기존 `sms.fromStandardNumber`/
-`sms.fromTraineeNumber` 설정으로 선택한다.
+`sms.fromTraineeNumber` 설정으로 선택한다. 사전등록은 기존 표준 발신번호를 사용한다.
 
 ## 개발 검증 하네스
 

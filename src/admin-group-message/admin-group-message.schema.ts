@@ -3,6 +3,27 @@ import { z } from 'zod';
 const id = z.string().trim().min(1).max(100);
 const phone = z.string().regex(/^0\d{8,10}$/);
 const content = z.string().min(1).max(2000);
+const participantId = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const ledgerKey = z
+  .string()
+  .max(160)
+  .superRefine((value, context) => {
+    const [source, expoId, ...parts] = value.split(':');
+    const key = parts.join(':');
+    const validKey =
+      source === 'APPLICATION'
+        ? Boolean(
+            key &&
+            /^[1-9]\d{0,18}$/.test(key) &&
+            BigInt(key) <= BigInt('9223372036854775807'),
+          )
+        : source === 'RESERVATION' && key.trim().length > 0;
+    if (!z.uuid().safeParse(expoId).success || !validKey)
+      context.addIssue({
+        code: 'custom',
+        message: 'invalid preregistration ledger key',
+      });
+  });
 
 export const templateVariablesSchema = z
   .object({
@@ -20,23 +41,38 @@ export const templateVariablesSchema = z
   })
   .strict();
 
-export const groupMessageTargetSchema = z
+const targetObjectSchema = z
   .object({
-    targetId: id,
-    applicationId: z.uuid(),
-    participantId: z
-      .number()
-      .int()
-      .positive()
-      .max(Number.MAX_SAFE_INTEGER)
-      .optional(),
-    programType: z.enum(['STANDARD', 'TRAINING']),
+    targetId: z.string().min(1).max(160),
+    ledgerKey: ledgerKey.optional(),
+    applicationId: z.uuid().optional(),
+    participantId: participantId.optional(),
+    programType: z.enum(['STANDARD', 'TRAINING']).optional(),
     recipientPhone: phone.optional(),
     content: content.optional(),
     templateVariables: templateVariablesSchema.optional(),
     missingReason: z.string().trim().min(1).max(200).optional(),
   })
   .strict()
+  .superRefine((target, context) => {
+    const valid =
+      target.ledgerKey !== undefined
+        ? target.targetId === target.ledgerKey &&
+          target.applicationId === undefined &&
+          target.programType === undefined &&
+          (target.ledgerKey.startsWith('APPLICATION:')
+            ? target.participantId !== undefined
+            : target.participantId === undefined)
+        : target.targetId.length <= 100 &&
+          target.applicationId !== undefined &&
+          target.programType !== undefined;
+    if (!valid)
+      context.addIssue({
+        code: 'custom',
+        message:
+          'program and preregistration target identities must not be mixed',
+      });
+  })
   .refine(
     (target) =>
       target.missingReason
@@ -47,6 +83,23 @@ export const groupMessageTargetSchema = z
         'sendable target requires phone and content; missing target requires missingReason only',
     },
   );
+
+function normalizeProgramTarget(value: unknown): unknown {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('targetId' in value) ||
+    typeof value.targetId !== 'string' ||
+    ('ledgerKey' in value && value.ledgerKey !== undefined)
+  )
+    return value;
+  return { ...value, targetId: value.targetId.trim() };
+}
+
+export const groupMessageTargetSchema = z.preprocess(
+  normalizeProgramTarget,
+  targetObjectSchema,
+);
 
 export const createGroupMessagePreviewSchema = z
   .object({
@@ -63,6 +116,7 @@ export const createGroupMessagePreviewSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    validateTargetSource(value, context);
     if (value.channel === 'KAKAO' && !value.templateId)
       context.addIssue({
         code: 'custom',
@@ -112,27 +166,49 @@ export type CreateGroupMessagePreview = z.infer<
 export type GroupMessageTarget = z.infer<typeof groupMessageTargetSchema>;
 export type AuthorizeGroupMessage = z.infer<typeof authorizeGroupMessageSchema>;
 
-const targetRecordSchema = groupMessageTargetSchema.extend({
-  status: z.enum([
-    'MISSING',
-    'PENDING',
-    'SENDING',
-    'ACCEPTED',
-    'DELIVERED',
-    'FAILED',
-    'UNKNOWN',
-  ]),
-  attemptId: z.uuid().optional(),
-  attemptedAt: z.iso.datetime().optional(),
-  groupId: z.string().max(100).optional(),
-  messageId: z.string().max(100).optional(),
-  deliveryCheckedAt: z.iso.datetime().optional(),
-  providerCode: z.string().max(50).optional(),
-  failureReason: z.string().max(200).optional(),
-});
+function validateTargetSource(
+  value: { expoId: string; targets: GroupMessageTarget[] },
+  context: z.RefinementCtx,
+): void {
+  const preregistration = value.targets[0]?.ledgerKey !== undefined;
+  for (const [index, target] of value.targets.entries()) {
+    if (
+      (target.ledgerKey !== undefined) !== preregistration ||
+      (target.ledgerKey !== undefined &&
+        target.ledgerKey.split(':')[1] !== value.expoId)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['targets', index, 'ledgerKey'],
+        message: 'target source and expo must match the preview or job',
+      });
+  }
+}
+
+const targetRecordSchema = z.preprocess(
+  normalizeProgramTarget,
+  targetObjectSchema.safeExtend({
+    status: z.enum([
+      'MISSING',
+      'PENDING',
+      'SENDING',
+      'ACCEPTED',
+      'DELIVERED',
+      'FAILED',
+      'UNKNOWN',
+    ]),
+    attemptId: z.uuid().optional(),
+    attemptedAt: z.iso.datetime().optional(),
+    groupId: z.string().max(100).optional(),
+    messageId: z.string().max(100).optional(),
+    deliveryCheckedAt: z.iso.datetime().optional(),
+    providerCode: z.string().max(50).optional(),
+    failureReason: z.string().max(200).optional(),
+  }),
+);
 
 export const groupMessagePreviewRecordSchema =
-  createGroupMessagePreviewSchema.extend({
+  createGroupMessagePreviewSchema.safeExtend({
     previewId: z.uuid(),
     createdAt: z.iso.datetime(),
     expiresAt: z.iso.datetime(),
@@ -141,30 +217,32 @@ export type GroupMessagePreviewRecord = z.infer<
   typeof groupMessagePreviewRecordSchema
 >;
 
-export const groupMessageJobSchema = z.object({
-  jobId: z.string().regex(/^[a-f0-9]{64}$/),
-  previewId: z.uuid(),
-  requesterUserId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  expoId: z.uuid(),
-  applicationCount: z.number().int().positive().optional(),
-  targetFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-  channel: z.enum(['SMS', 'KAKAO']),
-  templateId: id.optional(),
-  // 하위 호환으로 저장만 한다. 발송 동작에는 쓰지 않는다.
-  fallbackToSms: z.boolean().optional(),
-  status: z.enum([
-    'QUEUED',
-    'RUNNING',
-    'PAUSED',
-    'COMPLETED',
-    'COMPLETED_WITH_FAILURES',
-    'ATTENTION',
-  ]),
-  createdAt: z.iso.datetime(),
-  authorizedUntil: z.iso.datetime(),
-  reason: z.string().max(200).optional(),
-  targets: z.array(targetRecordSchema).min(1).max(5000),
-});
+export const groupMessageJobSchema = z
+  .object({
+    jobId: z.string().regex(/^[a-f0-9]{64}$/),
+    previewId: z.uuid(),
+    requesterUserId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    expoId: z.uuid(),
+    applicationCount: z.number().int().positive().optional(),
+    targetFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    channel: z.enum(['SMS', 'KAKAO']),
+    templateId: id.optional(),
+    // 하위 호환으로 저장만 한다. 발송 동작에는 쓰지 않는다.
+    fallbackToSms: z.boolean().optional(),
+    status: z.enum([
+      'QUEUED',
+      'RUNNING',
+      'PAUSED',
+      'COMPLETED',
+      'COMPLETED_WITH_FAILURES',
+      'ATTENTION',
+    ]),
+    createdAt: z.iso.datetime(),
+    authorizedUntil: z.iso.datetime(),
+    reason: z.string().max(200).optional(),
+    targets: z.array(targetRecordSchema).min(1).max(5000),
+  })
+  .superRefine(validateTargetSource);
 export type GroupMessageJob = z.infer<typeof groupMessageJobSchema>;
 
 export function parseGroupMessagePreviewRecord(

@@ -55,7 +55,7 @@ export class FakeGroupMessageSender implements GroupMessageSender {
     if (result.kind !== 'accepted') return Promise.resolve(result);
     return Promise.resolve({
       ...result,
-      messageId: `${result.messageId}-${target.targetId}-${this.sends.length}`,
+      messageId: `synthetic-message-${this.sends.length}`,
     });
   }
 

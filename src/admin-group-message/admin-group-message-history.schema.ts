@@ -21,6 +21,7 @@ export const groupMessageHistoryEventSchema = z
       kind: z.literal('EXPLICIT_TARGETS'),
       applicationCount: z.number().int().positive().nullable(),
       programTypes: z.array(z.enum(['STANDARD', 'TRAINING'])),
+      source: z.literal('PREREGISTRATION').optional(),
     }),
     counts: z.object({
       total: z.number().int().nonnegative(),

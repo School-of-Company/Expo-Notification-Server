@@ -57,6 +57,11 @@ Notification에서 다른 행사 커서를 재사용하거나 행사 ID를 변�
 
 각 item은 `eventId`, `type`, `adminId`, `occurredAt`, `targetScope`, `counts`, `status`, `jobId`만 포함한다. `targetScope.kind=EXPLICIT_TARGETS`, `applicationCount`, 정렬된 `programTypes`는 Notification이 전달받은 고정 발송 대상 범위다. Application의 `SELECTED`/`FILTERED` 원본 선택 방식과 필터는 기존 Notification 요청에 전달되지 않으므로 추측하지 않는다. 본문·번호·대상 ID 목록·fingerprint·template 변수·공급자 raw 오류·토큰은 포함하지 않는다.
 
+사전등록 그룹 발송은 `targetScope.source=PREREGISTRATION`, `programTypes=[]`로 구분한다.
+기존 프로그램 이력은 source 없이 기존 enum 배열을 유지하고, source 없는 과거 저장 이력도 읽는다.
+Application/Client는 optional source와 빈 programTypes를 수용해야 한다.
+상세 계약과 배포 순서는 [#106 계약](notification-106-preregistration-group-message.md)을 따른다.
+
 `counts`는 `total`, `pending`(PENDING+SENDING), `accepted`, `delivered`, `failed`, `unknown`, `missing`을 분리한다. 공급자 접수는 최종 도착 성공으로 세지 않는다. `adminId`는 조회자가 아니라 최초 요청/재시도 작업을 승인한 관리자 ID다. 현재 기존 재시도 계약은 원래 요청자와 같은 관리자만 허용한다. 자동 공급자 결과 이벤트의 ID는 해당 작업의 요청 관리자에 귀속되며 사람이 그 시각에 직접 조작했다는 뜻은 아니다.
 
 | type | 기록 시점 |

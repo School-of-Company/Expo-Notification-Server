@@ -70,8 +70,15 @@ export function groupMessageHistoryMutation(
     targetScope: {
       kind: 'EXPLICIT_TARGETS',
       applicationCount: job.applicationCount ?? null,
+      ...(job.targets[0]?.ledgerKey !== undefined
+        ? { source: 'PREREGISTRATION' as const }
+        : {}),
       programTypes: [
-        ...new Set(job.targets.map((target) => target.programType)),
+        ...new Set(
+          job.targets.flatMap((target) =>
+            target.programType ? [target.programType] : [],
+          ),
+        ),
       ].sort(),
     },
     counts: {
