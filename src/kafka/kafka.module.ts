@@ -3,6 +3,7 @@ import { Kafka } from 'kafkajs';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { AppConfig } from '../config/app-config';
 import { KAFKA_CLIENT } from './kafka.constants';
+import { kafkaLogCreator } from './kafka-log-creator';
 
 @Global()
 @Module({
@@ -14,6 +15,7 @@ import { KAFKA_CLIENT } from './kafka.constants';
         new Kafka({
           clientId: config.kafka.clientId,
           brokers: config.kafka.brokers,
+          logCreator: kafkaLogCreator,
         }),
     },
   ],
