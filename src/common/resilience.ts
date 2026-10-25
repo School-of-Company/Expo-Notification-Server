@@ -1,16 +1,18 @@
 import {
   BrokenCircuitError,
   circuitBreaker,
-  ConsecutiveBreaker,
   ConstantBackoff,
   handleWhen,
   retry,
+  SamplingBreaker,
   type CircuitBreakerPolicy,
   type IPolicy,
 } from 'cockatiel';
 
-const FAILURE_THRESHOLD = 5;
-const HALF_OPEN_MS = 30_000;
+const DEFAULT_MIN_CALLS = 10;
+const DEFAULT_FAILURE_RATE_PERCENT = 50;
+const DEFAULT_WINDOW_MS = 30_000;
+const DEFAULT_HALF_OPEN_MS = 30_000;
 const RETRY_DELAY_MS = 200;
 
 /**
@@ -46,6 +48,46 @@ function isRetryable(error: unknown): boolean {
   );
 }
 
+function readInteger(name: string, fallback: number, min: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < min) {
+    throw new Error(`${name} must be an integer of at least ${min}.`);
+  }
+  return value;
+}
+
+/**
+ * 최근 `WINDOW_MS` 동안 호출이 `MIN_CALLS`번 이상이고 실패율이 `FAILURE_RATE` 퍼센트를 넘으면 연다. 재시도가 요청마다
+ * 실패를 두 번 세므로 "연속 N회"는 요청 두세 번으로 열렸다. 호출이 적을 때 몇 번의 실패로 열리지 않게 한다.
+ */
+function createSamplingBreaker(): SamplingBreaker {
+  const windowMs = readInteger(
+    'DOWNSTREAM_BREAKER_WINDOW_MS',
+    DEFAULT_WINDOW_MS,
+    1000,
+  );
+  const minCalls = readInteger(
+    'DOWNSTREAM_BREAKER_MIN_CALLS',
+    DEFAULT_MIN_CALLS,
+    1,
+  );
+  const ratePercent = readInteger(
+    'DOWNSTREAM_BREAKER_FAILURE_RATE',
+    DEFAULT_FAILURE_RATE_PERCENT,
+    1,
+  );
+  if (ratePercent > 99) {
+    throw new Error('DOWNSTREAM_BREAKER_FAILURE_RATE must be at most 99.');
+  }
+  return new SamplingBreaker({
+    threshold: ratePercent / 100,
+    duration: windowMs,
+    minimumRps: minCalls / (windowMs / 1000),
+  });
+}
+
 interface ServiceGuard {
   readonly breaker: CircuitBreakerPolicy;
   readonly retryPolicy: IPolicy;
@@ -59,8 +101,12 @@ function guardFor(service: string): ServiceGuard {
   if (guard === undefined) {
     guard = {
       breaker: circuitBreaker(handleWhen(isTransientFailure), {
-        halfOpenAfter: HALF_OPEN_MS,
-        breaker: new ConsecutiveBreaker(FAILURE_THRESHOLD),
+        halfOpenAfter: readInteger(
+          'DOWNSTREAM_BREAKER_HALF_OPEN_MS',
+          DEFAULT_HALF_OPEN_MS,
+          1,
+        ),
+        breaker: createSamplingBreaker(),
       }),
       retryPolicy: retry(handleWhen(isRetryable), {
         maxAttempts: 1,
@@ -73,7 +119,7 @@ function guardFor(service: string): ServiceGuard {
 }
 
 /**
- * 하위 서비스 호출을 회로 차단기로 감싼다. 연속 실패가 한도를 넘으면 회로가 열려 한동안 호출하지 않고
+ * 하위 서비스 호출을 회로 차단기로 감싼다. 실패율이 한도를 넘으면 회로가 열려 한동안 호출하지 않고
  * `openError()`가 만든 오류로 바로 실패한다 — 호출자가 이미 처리하는 오류 타입을 그대로 쓰기 위해서다.
  *
  * `idempotent`일 때만 재시도한다(멱등한 GET). 쓰기·발송은 응답을 못 받았어도 상대가 처리했을 수 있어 재시도하지 않는다.

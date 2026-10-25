@@ -1,7 +1,8 @@
 import { getInternal, InternalCallError, postInternal } from './internal-http';
 import { guardDownstream, resetDownstreamGuards } from './resilience';
 
-const THRESHOLD = 5;
+// 최소 호출 수(기본 10)만큼 모두 실패하면 열린다.
+const THRESHOLD = 10;
 const ok = { ok: true, status: 200 } as Response;
 const fail = (status: number) => ({ ok: false, status }) as Response;
 const post = (service: string) =>
@@ -16,7 +17,7 @@ describe('하위 서비스 회로 차단기', () => {
   afterEach(() => fetchSpy.mockReset());
   afterAll(() => fetchSpy.mockRestore());
 
-  it('연속 5xx가 한도를 넘으면 회로가 열려 호출 없이 InternalCallError로 실패한다', async () => {
+  it('5xx 실패율이 한도를 넘으면 회로가 열려 호출 없이 InternalCallError로 실패한다', async () => {
     fetchSpy.mockResolvedValue(fail(503));
     for (let i = 0; i < THRESHOLD; i++) await post('user');
     fetchSpy.mockClear();
@@ -106,5 +107,39 @@ describe('하위 서비스 회로 차단기', () => {
       guardDownstream('s', false, call, () => new Error('open')),
     ).rejects.toThrow('open');
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it('호출이 최소 횟수보다 적으면 모두 실패해도 열지 않는다', async () => {
+    fetchSpy.mockResolvedValue(fail(503));
+    for (let i = 0; i < THRESHOLD - 1; i++) await post('user');
+    fetchSpy.mockResolvedValue(ok);
+
+    expect(await post('user')).toBe(ok);
+  });
+
+  it('실패율이 한도 이하면 열지 않는다', async () => {
+    for (let i = 0; i < 30; i++) {
+      fetchSpy.mockResolvedValueOnce(i % 3 === 0 ? fail(503) : ok);
+      await post('user');
+    }
+    fetchSpy.mockResolvedValue(ok);
+
+    expect(await post('user')).toBe(ok);
+  });
+
+  it('잘못된 환경변수는 오류로 알린다', async () => {
+    process.env.DOWNSTREAM_BREAKER_MIN_CALLS = '0';
+    try {
+      await expect(
+        guardDownstream(
+          'env',
+          false,
+          () => Promise.resolve(1),
+          () => new Error('open'),
+        ),
+      ).rejects.toThrow('DOWNSTREAM_BREAKER_MIN_CALLS');
+    } finally {
+      delete process.env.DOWNSTREAM_BREAKER_MIN_CALLS;
+    }
   });
 });

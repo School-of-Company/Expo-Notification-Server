@@ -81,9 +81,9 @@ describe('DiscordProvider', () => {
         .sendEmbeds('https://discord.test/secret-token', [embed()])
         .catch((e: unknown) => e);
 
-    it('연속 5xx가 한도를 넘으면 호출 없이 DiscordDeliveryError로 실패한다', async () => {
+    it('5xx 실패율이 한도를 넘으면 호출 없이 DiscordDeliveryError로 실패한다', async () => {
       fetchSpy.mockResolvedValue({ ok: false, status: 502 } as Response);
-      for (let i = 0; i < 5; i++) await send();
+      for (let i = 0; i < 10; i++) await send();
       fetchSpy.mockClear();
 
       const error = await send();
