@@ -3,6 +3,7 @@ import {
   DiscordEmbed,
   DiscordProvider,
 } from './discord.provider';
+import { resetDownstreamGuards } from '../common/resilience';
 
 const embed = (n = 1): DiscordEmbed => ({
   description: `d${n}`,
@@ -14,6 +15,7 @@ describe('DiscordProvider', () => {
   const provider = new DiscordProvider();
   const fetchSpy = jest.spyOn(globalThis, 'fetch');
 
+  beforeEach(() => resetDownstreamGuards());
   afterEach(() => fetchSpy.mockReset());
   afterAll(() => fetchSpy.mockRestore());
 
@@ -71,5 +73,41 @@ describe('DiscordProvider', () => {
 
     expect(error).toBeInstanceOf(DiscordDeliveryError);
     expect((error as Error).message).not.toContain('secret-token');
+  });
+
+  describe('회로 차단기', () => {
+    const send = () =>
+      provider
+        .sendEmbeds('https://discord.test/secret-token', [embed()])
+        .catch((e: unknown) => e);
+
+    it('5xx 실패율이 한도를 넘으면 호출 없이 DiscordDeliveryError로 실패한다', async () => {
+      fetchSpy.mockResolvedValue({ ok: false, status: 502 } as Response);
+      for (let i = 0; i < 10; i++) await send();
+      fetchSpy.mockClear();
+
+      const error = await send();
+
+      expect(error).toBeInstanceOf(DiscordDeliveryError);
+      expect((error as Error).message).toBe('discord circuit open');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('429 같은 4xx는 회로에 반영하지 않는다', async () => {
+      fetchSpy.mockResolvedValue({ ok: false, status: 429 } as Response);
+      for (let i = 0; i < 10; i++) await send();
+      fetchSpy.mockResolvedValue({ ok: true, status: 204 } as Response);
+
+      expect(await send()).toBeUndefined();
+    });
+
+    it('5xx·타임아웃이어도 POST는 재시도하지 않는다', async () => {
+      fetchSpy.mockResolvedValue({ ok: false, status: 503 } as Response);
+      await send();
+      fetchSpy.mockRejectedValue(new DOMException('t', 'TimeoutError'));
+      await send();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
   });
 });
