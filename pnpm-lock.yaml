@@ -26,6 +26,9 @@ importers:
       '@school-of-company/nestjs-eureka':
         specifier: ^0.1.0
         version: 0.1.0(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))
+      cockatiel:
+        specifier: 4.0.0
+        version: 4.0.0
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
@@ -1634,6 +1637,10 @@ packages:
   co@4.6.0:
     resolution: {integrity: sha512-QVb0dM5HvG+uaxitm8wONl7jltx8dqhfU33DcqtOZcLSVIKSDDLDi7+0LbAKiyI8hD9u42m2YxXSkMGWThaecQ==}
     engines: {iojs: '>= 1.0.0', node: '>= 0.12.0'}
+
+  cockatiel@4.0.0:
+    resolution: {integrity: sha512-XpUZJnogsd03BGB19T9sv7Xb8SwvD8JddZV2Tlp0LNspopZ6Idv24ZwCl8vAGJ6JwODZ0zLRYVj3NWvmRcUDqA==}
+    engines: {node: '>=22'}
 
   collect-v8-coverage@1.0.3:
     resolution: {integrity: sha512-1L5aqIkwPfiodaMgQunkF1zRhNqifHBmtbbbxcr6yVxxBnliw4TDOW6NxpO8DJLgJ16OT+Y4ztZqP6p/FtXnAw==}
@@ -5316,6 +5323,8 @@ snapshots:
   cluster-key-slot@1.1.1: {}
 
   co@4.6.0: {}
+
+  cockatiel@4.0.0: {}
 
   collect-v8-coverage@1.0.3: {}
 

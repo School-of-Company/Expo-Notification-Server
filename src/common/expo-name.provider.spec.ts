@@ -43,9 +43,13 @@ describe('ExpoNameProvider', () => {
 
   it('조회가 실패하면 기본 행사명을 쓰고 실패는 캐시하지 않는다', async () => {
     fetchSpy.mockRejectedValueOnce(new Error('down'));
+    fetchSpy.mockRejectedValueOnce(new Error('down'));
     fetchSpy.mockResolvedValue(page([{ expoId: 'e1', title: '광주 박람회' }]));
 
-    await expect(provider.titleOf('e1')).resolves.toBe(config.sms.expoName);
+    // GET은 즉시 실패를 한 번 재시도하므로 재시도 대기(가짜 타이머)를 넘겨 준다.
+    const failed = provider.titleOf('e1');
+    await jest.advanceTimersByTimeAsync(1000);
+    await expect(failed).resolves.toBe(config.sms.expoName);
     await expect(provider.titleOf('e1')).resolves.toBe('광주 박람회');
   });
 
