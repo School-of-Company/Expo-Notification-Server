@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { AppConfigModule } from './config/app-config.module';
 import { EurekaClientModule } from './eureka/eureka-client.module';
 import { KafkaModule } from './kafka/kafka.module';
+import { HttpAccessLogModule } from './logging/http-access-log.module';
 import { RedisModule } from './redis/redis.module';
 import { SmsModule } from './sms/sms.module';
 import { PromotionModule } from './promotion/promotion.module';
@@ -15,6 +16,7 @@ import { AdminGroupMessageModule } from './admin-group-message/admin-group-messa
 @Module({
   imports: [
     AppConfigModule,
+    HttpAccessLogModule,
     ScheduleModule.forRoot(),
     EurekaClientModule,
     KafkaModule,

@@ -49,6 +49,9 @@ function configFromEnv(env: Env): Record<string, unknown> {
       port: env.METRICS_PORT,
       host: env.METRICS_HOST,
     }),
+    httpAccessLog: pickDefined({
+      enabled: env.HTTP_ACCESS_LOG_ENABLED,
+    }),
     swagger: pickDefined({
       enabled: env.SWAGGER_ENABLED,
       includeInternal: env.SWAGGER_INCLUDE_INTERNAL,
