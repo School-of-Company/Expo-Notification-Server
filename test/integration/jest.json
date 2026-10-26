@@ -2,7 +2,22 @@
   "rootDir": "../..",
   "testEnvironment": "node",
   "testRegex": "test/integration/.*\\.integration-spec\\.ts$",
-  "transform": { "^.+\\.ts$": "ts-jest" },
+  "transform": {
+    "node_modules/cockatiel/.+\\.js$": [
+      "ts-jest",
+      {
+        "tsconfig": {
+          "allowJs": true,
+          "module": "commonjs",
+          "target": "ES2023"
+        }
+      }
+    ],
+    "^.+\\.ts$": "ts-jest"
+  },
   "testTimeout": 60000,
-  "maxWorkers": 1
+  "maxWorkers": 1,
+  "transformIgnorePatterns": [
+    "/node_modules/(?!(\\.pnpm/cockatiel@[^/]+/node_modules/)?cockatiel/)"
+  ]
 }
