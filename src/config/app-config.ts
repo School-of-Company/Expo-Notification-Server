@@ -63,6 +63,15 @@ const baseAppConfigSchema = z.object({
       host: z.union([z.ipv4(), z.ipv6()]).default('127.0.0.1'),
     })
     .prefault({}),
+  // HTTP 요청마다 접근 로그 한 줄(module HttpAccess). false면 끈다.
+  httpAccessLog: z
+    .object({
+      enabled: z
+        .stringbool({ truthy: ['true'], falsy: ['false'] })
+        .or(z.boolean())
+        .default(true),
+    })
+    .prefault({}),
   swagger: z
     .object({
       enabled: z

@@ -47,6 +47,17 @@ describe('loadConfig', () => {
     expect(config.discord.participantNumberUrl).toBeUndefined();
   });
 
+  it('HTTP 접근 로그는 기본으로 켜지고 HTTP_ACCESS_LOG_ENABLED=false로 끈다', async () => {
+    expect((await loadConfig(baseEnv, jest.fn())).httpAccessLog.enabled).toBe(
+      true,
+    );
+    const disabled = await loadConfig(
+      { ...baseEnv, HTTP_ACCESS_LOG_ENABLED: 'false' },
+      jest.fn(),
+    );
+    expect(disabled.httpAccessLog.enabled).toBe(false);
+  });
+
   it('EUREKA_SERVICE_URL이 없으면 Eureka 등록 설정이 없다 (로컬 개발)', async () => {
     const config = await loadConfig(baseEnv, jest.fn());
 
