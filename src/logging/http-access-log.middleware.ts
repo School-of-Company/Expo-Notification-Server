@@ -71,7 +71,7 @@ export class HttpAccessLogMiddleware implements NestMiddleware {
       const ms = Math.round(
         Number(process.hrtime.bigint() - started) / 1_000_000,
       );
-      const message = `${req.method} ${routeOf(req, middlewareRoute)} ${status} ${ms}ms`;
+      const message = `${req.method} ${routeOf(req, middlewareRoute)} status: ${status} (${ms}ms)`;
       if (status >= 500 || status === CLIENT_CLOSED_STATUS) {
         this.logger.error(message);
       } else if (status >= 400) {

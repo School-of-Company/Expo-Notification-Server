@@ -117,7 +117,9 @@ describe('HttpAccessLogMiddleware', () => {
       service: 'expo-test',
       module: 'HttpAccess',
     });
-    expect(logged[0].message).toMatch(/^GET \/probe\/:phoneNumber 200 \d+ms$/);
+    expect(logged[0].message).toMatch(
+      /^GET \/probe\/:phoneNumber status: 200 \(\d+ms\)$/,
+    );
     const raw = JSON.stringify(logged);
     expect(raw).not.toContain('01012345678');
     expect(raw).not.toContain('secret');
@@ -132,9 +134,13 @@ describe('HttpAccessLogMiddleware', () => {
     const logged = accessLines(lines);
     expect(logged).toHaveLength(2);
     expect(logged[0]).toMatchObject({ level: 'WARN' });
-    expect(logged[0].message).toMatch(/^GET \/probe\/:id\/bad 400 \d+ms$/);
+    expect(logged[0].message).toMatch(
+      /^GET \/probe\/:id\/bad status: 400 \(\d+ms\)$/,
+    );
     expect(logged[1]).toMatchObject({ level: 'ERROR' });
-    expect(logged[1].message).toMatch(/^GET \/probe\/:id\/fail 500 \d+ms$/);
+    expect(logged[1].message).toMatch(
+      /^GET \/probe\/:id\/fail status: 500 \(\d+ms\)$/,
+    );
   });
 
   it('매칭된 라우트가 없으면 쿼리를 뗀 원래 경로를 200자까지만 남긴다', async () => {
@@ -147,10 +153,12 @@ describe('HttpAccessLogMiddleware', () => {
     const logged = accessLines(lines);
     expect(logged).toHaveLength(2);
     expect(logged[0]).toMatchObject({ level: 'WARN' });
-    expect(logged[0].message).toMatch(/^GET \/nope\/abc 404 \d+ms$/);
+    expect(logged[0].message).toMatch(
+      /^GET \/nope\/abc status: 404 \(\d+ms\)$/,
+    );
     expect(JSON.stringify(logged)).not.toContain('01012345678');
     expect(logged[1].message).toBe(
-      `GET ${long.slice(0, 200)} 404 ${/ (\d+)ms$/.exec(logged[1].message as string)?.[1]}ms`,
+      `GET ${long.slice(0, 200)} status: 404 (${/\((\d+)ms\)$/.exec(logged[1].message as string)?.[1]}ms)`,
     );
   });
 
@@ -203,7 +211,9 @@ describe('HttpAccessLogMiddleware', () => {
       const logged = accessLines(lines);
       expect(logged).toHaveLength(1);
       expect(logged[0]).toMatchObject({ level: 'ERROR' });
-      expect(logged[0].message).toMatch(/^POST \/probe\/1 499 \d+ms$/);
+      expect(logged[0].message).toMatch(
+        /^POST \/probe\/1 status: 499 \(\d+ms\)$/,
+      );
     });
 
     it('정상 종료 뒤의 close로는 한 번 더 남기지 않는다', () => {
@@ -216,7 +226,9 @@ describe('HttpAccessLogMiddleware', () => {
 
       const logged = accessLines(lines);
       expect(logged).toHaveLength(1);
-      expect(logged[0].message).toMatch(/^POST \/probe\/1 200 \d+ms$/);
+      expect(logged[0].message).toMatch(
+        /^POST \/probe\/1 status: 200 \(\d+ms\)$/,
+      );
     });
   });
 });
