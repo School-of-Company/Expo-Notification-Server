@@ -46,6 +46,13 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       baseUrl: 'http://expo.test',
       internalToken: 'b'.repeat(32),
     },
+    expoProjection: {
+      enabled: false,
+      topic: 'expo.expo.changed',
+      groupId: 'expo-notification-server.expo-changed',
+      deadLetterTopic: 'expo.expo.changed.dlq',
+      maxAttempts: 5,
+    },
     discord: { participantNumberUrl: 'https://discord.test/webhook' },
     ...overrides,
   };

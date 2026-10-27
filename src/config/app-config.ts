@@ -171,6 +171,22 @@ const baseAppConfigSchema = z.object({
     .optional(),
   user: serviceClient.optional(),
   expo: serviceClient.optional(),
+  // expo.expo.changed로 만든 Redis 프로젝션에서 박람회 목록·사전등록 회차를 읽는다(Expo #212). 끄면 지금처럼 Expo를 동기 조회한다.
+  expoProjection: z
+    .object({
+      enabled: z
+        .stringbool({ truthy: ['true'], falsy: ['false'] })
+        .or(z.boolean())
+        .default(false),
+      topic: z.string().min(1).default('expo.expo.changed'),
+      groupId: z
+        .string()
+        .min(1)
+        .default('expo-notification-server.expo-changed'),
+      deadLetterTopic: z.string().min(1).default('expo.expo.changed.dlq'),
+      maxAttempts: z.coerce.number().int().positive().default(5),
+    })
+    .prefault({}),
   promotion: z
     .object({
       enabled: z
