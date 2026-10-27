@@ -51,7 +51,8 @@ expo-notification-server/
 │   ├── redis/         # shared Redis client (REDIS_CLIENT token)
 │   ├── common/        # zod pipe, kafka JSON parsing, phone masking
 │   ├── sms/           # controller (verify code), consumer (events), services, stores, Solapi provider
-│   └── alarm/         # scheduler, report service, internal-API count provider, Discord provider
+│   ├── alarm/         # scheduler, report service, internal-API count provider, Discord provider
+│   └── expo-projection/ # expo.expo.changed consumer → Redis projection of expo list/sessions (flag, sync fallback)
 ├── test/              # e2e specs + fixtures (fake Redis, app-config fixture)
 └── docs/events-and-config.md
 ```
