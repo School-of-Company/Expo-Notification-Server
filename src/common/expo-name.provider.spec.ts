@@ -1,5 +1,14 @@
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
+import { AppConfig } from '../config/app-config';
+import type { ExpoProjectionStore } from '../expo-projection/expo-projection.store';
+import { ExpoReadProvider } from '../expo-projection/expo-read.provider';
 import { ExpoNameProvider } from './expo-name.provider';
+
+const create = (config: AppConfig) =>
+  new ExpoNameProvider(
+    config,
+    new ExpoReadProvider(config, {} as ExpoProjectionStore),
+  );
 
 const page = (content: { expoId: string; title: string }[]) =>
   Response.json({ content, hasNext: false });
@@ -12,7 +21,7 @@ describe('ExpoNameProvider', () => {
   beforeEach(() => {
     jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
     fetchSpy.mockReset();
-    provider = new ExpoNameProvider(config);
+    provider = create(config);
   });
   afterEach(() => jest.useRealTimers());
   afterAll(() => fetchSpy.mockRestore());
@@ -54,7 +63,7 @@ describe('ExpoNameProvider', () => {
   });
 
   it('Expo 연결 설정이 없으면 조회하지 않는다', async () => {
-    provider = new ExpoNameProvider({ ...config, expo: undefined });
+    provider = create({ ...config, expo: undefined });
 
     await expect(provider.titleOf('e1')).resolves.toBe(config.sms.expoName);
     expect(fetchSpy).not.toHaveBeenCalled();

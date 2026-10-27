@@ -1,3 +1,4 @@
+import { ExpoProjectionModule } from '../expo-projection/expo-projection.module';
 import { Module } from '@nestjs/common';
 import { SolapiMessageService } from 'solapi';
 import { AppConfig } from '../config/app-config';
@@ -19,6 +20,7 @@ import { SOLAPI_CLIENT } from './sms.constants';
 import { SmsController } from './sms.controller';
 
 @Module({
+  imports: [ExpoProjectionModule],
   controllers: [SmsController],
   providers: [
     {
