@@ -1,6 +1,8 @@
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import { InternalCallError } from '../common/internal-http';
 import { AppConfig } from '../config/app-config';
+import type { ExpoProjectionStore } from '../expo-projection/expo-projection.store';
+import { ExpoReadProvider } from '../expo-projection/expo-read.provider';
 import { ApplicantCountProvider } from './applicant-count.provider';
 
 const json = (body: unknown) =>
@@ -19,6 +21,12 @@ const promotionOffer = {
 };
 const withApplication = (overrides: Partial<AppConfig> = {}) =>
   createAppConfig({ promotionOffer, ...overrides });
+// 프로젝션이 꺼져 있으면 저장소를 읽지 않는다.
+const create = (config: AppConfig) =>
+  new ApplicantCountProvider(
+    config,
+    new ExpoReadProvider(config, {} as ExpoProjectionStore),
+  );
 
 // 2026-10-19 운영 재현: 참가자 행 8명 중 일행 4명이 취소해 확정은 4명이다.
 const summary = (expoId: string) => ({
@@ -37,7 +45,7 @@ const summary = (expoId: string) => ({
 
 describe('ApplicantCountProvider', () => {
   const fetchSpy = jest.spyOn(globalThis, 'fetch');
-  const provider = new ApplicantCountProvider(withApplication());
+  const provider = create(withApplication());
   const urls = () => fetchSpy.mock.calls.map(([url]) => url as string);
 
   afterEach(() => fetchSpy.mockReset());
@@ -122,8 +130,7 @@ describe('ApplicantCountProvider', () => {
   });
 
   it('Application 연결은 promotionOffer, 없으면 promotion 설정을 쓰고 둘 다 없거나 expo가 없으면 미설정이다', () => {
-    const configured = (config: AppConfig) =>
-      new ApplicantCountProvider(config).isConfigured();
+    const configured = (config: AppConfig) => create(config).isConfigured();
 
     expect(configured(withApplication())).toBe(true);
     expect(

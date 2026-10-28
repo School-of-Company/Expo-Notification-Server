@@ -1,9 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { z } from 'zod';
 import { getInternal, InternalCallError } from '../common/internal-http';
-import { expoIdSchema, fetchActiveExpos } from '../common/expo-name.provider';
+import { expoIdSchema } from '../common/expo-internal-api';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { ExpoReadProvider } from '../expo-projection/expo-read.provider';
 
 const preregisterSummary = z.object({
   expoId: expoIdSchema,
@@ -16,9 +17,6 @@ const preregisterSummary = z.object({
     }),
   ),
 });
-const preregisterSessions = z.array(
-  z.object({ id: z.number().int(), title: z.string().min(1) }),
-);
 
 export interface SessionApplicantCount {
   title: string;
@@ -38,19 +36,22 @@ const TIMEOUT_MS = 5_000;
 
 @Injectable()
 export class ApplicantCountProvider {
-  constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
+  constructor(
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly expos: ExpoReadProvider,
+  ) {}
 
   isConfigured(): boolean {
-    return Boolean(this.config.expo && this.application());
+    return Boolean(this.expos.isConfigured() && this.application());
   }
 
   async findAll(): Promise<ExpoApplicantCount[]> {
-    const expos = await fetchActiveExpos(this.expo());
+    const expos = await this.expos.activeExpos();
     return Promise.all(
       expos.map(async ({ expoId, title }) => {
         const [summary, sessionTitles] = await Promise.all([
           this.summary(expoId),
-          this.sessionTitles(expoId),
+          this.expos.preregisterSessionTitles(expoId),
         ]);
         return {
           expoId,
@@ -88,32 +89,11 @@ export class ApplicantCountProvider {
     return parsed.data;
   }
 
-  private async sessionTitles(id: string): Promise<Map<number, string>> {
-    const { baseUrl, internalToken } = this.expo();
-    const response = await getInternal(
-      'expo',
-      baseUrl,
-      `/internal/expo/${encodeURIComponent(id)}/preregister-sessions`,
-      internalToken,
-      TIMEOUT_MS,
-    );
-    const parsed = preregisterSessions.safeParse(await response.json());
-    if (!parsed.success) {
-      throw new InternalCallError('expo returned invalid preregister sessions');
-    }
-    return new Map(parsed.data.map((session) => [session.id, session.title]));
-  }
-
   // 리포트 전용 키를 두지 않고 기존 Application 연결을 재사용한다(#68).
   private application() {
     return (
       this.config.promotionOffer?.application ??
       this.config.promotion?.application
     );
-  }
-
-  private expo() {
-    if (!this.config.expo) throw new InternalCallError('expo not configured');
-    return this.config.expo;
   }
 }

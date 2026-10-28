@@ -58,6 +58,26 @@ describe('loadConfig', () => {
     expect(disabled.httpAccessLog.enabled).toBe(false);
   });
 
+  it('박람회 프로젝션은 기본으로 꺼져 있고 KAFKA_EXPO_PROJECTION_* 로 켠다', async () => {
+    expect((await loadConfig(baseEnv, jest.fn())).expoProjection).toEqual({
+      enabled: false,
+      topic: 'expo.expo.changed',
+      groupId: 'expo-notification-server.expo-changed',
+      deadLetterTopic: 'expo.expo.changed.dlq',
+      maxAttempts: 5,
+    });
+    const enabled = await loadConfig(
+      {
+        ...baseEnv,
+        KAFKA_EXPO_PROJECTION_ENABLED: 'true',
+        KAFKA_EXPO_PROJECTION_MAX_ATTEMPTS: '3',
+      },
+      jest.fn(),
+    );
+    expect(enabled.expoProjection.enabled).toBe(true);
+    expect(enabled.expoProjection.maxAttempts).toBe(3);
+  });
+
   it('EUREKA_SERVICE_URL이 없으면 Eureka 등록 설정이 없다 (로컬 개발)', async () => {
     const config = await loadConfig(baseEnv, jest.fn());
 

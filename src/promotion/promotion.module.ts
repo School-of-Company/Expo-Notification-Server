@@ -1,3 +1,4 @@
+import { ExpoProjectionModule } from '../expo-projection/expo-projection.module';
 import { Module } from '@nestjs/common';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
@@ -13,6 +14,7 @@ import {
 } from './promotion.controller';
 
 @Module({
+  imports: [ExpoProjectionModule],
   controllers: [PromotionController],
   providers: [
     PromotionApplicationProvider,
