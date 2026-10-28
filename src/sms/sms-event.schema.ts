@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { expoIdSchema } from '../common/expo-name.provider';
+import { expoIdSchema } from '../common/expo-internal-api';
 import { applicationResultEventSchema } from './application-result.schema';
 
 const phoneNumber = z.string().regex(/^01\d{8,9}$/);

@@ -162,6 +162,18 @@ processing(선점 5분) 이벤트는 건너뛰거나 DLQ로 보내지 않고 기
 - `expo`나 Application 연결 설정, `discord.participantNumberUrl` 중 하나라도 없으면 리포트와 스냅샷을 생략한다. 리포트를 즉시 멈추려면 `discord.participantNumberUrl`을 비운다.
 - 크론은 Redis 락(`alarm:lock:*`, 55초)으로 인스턴스가 여러 개여도 한 번만 실행된다.
 
+## 박람회 프로젝션 (`expo.expo.changed` 소비, Expo #212)
+
+위 리포트의 1·3번 조회와 문자 `#{행사명}`이 읽는 Expo 값(진행 중·예정 박람회 목록과 제목, 사전등록 회차 이름)을 Expo가 발행하는 `expo.expo.changed`(계약: Expo-Expo-Server `docs/expo-change-events.md`)로 Redis에 복사해 둔다. 이 서버가 Expo에 보내는 HTTP는 이 두 GET뿐이며 모두 읽기다. Application 집계 조회(2번)는 그대로 동기다.
+
+- `expoProjection.enabled`(env `KAFKA_EXPO_PROJECTION_ENABLED`, 기본 `false`). 꺼져 있으면 consumer를 띄우지 않고 지금처럼 Expo를 동기 조회한다.
+- 켜면 consumer 그룹 `expo-notification-server.expo-changed`가 처음부터 구독한다. 저장된 `version` 이하 메시지는 버리고(Lua로 비교와 저장을 한 번에), 메시지마다 박람회 전체를 덮어쓴다. tombstone(`deleted: true`)은 박람회를 지우되 `version`은 남긴다.
+- 저장 키(`{notifications}` 해시 태그): `expo-projection:{notifications}:expo:{expoId}`(제목·시작일·종료일·삭제 중 여부·회차 `id`/`title`만, JSON), `...:version:{expoId}`, `...:active`(삭제 중이 아닌 박람회를 종료일로 정렬한 ZSET, SCAN 없이 진행 중 목록을 읽는다), `...:ready`(이벤트를 한 번이라도 반영한 표시). TTL은 없다.
+- 진행 중 목록: 종료일이 오늘(KST) 이후이고 삭제 중이 아닌 박람회를 시작일·id 순으로 돌려준다(Expo `GET /internal/expo`와 같은 조건). `ready` 표시가 없으면(이벤트를 한 번도 받지 않음) Expo를 동기 조회한다.
+- 회차: 프로젝션에 없거나 삭제 중인 박람회면 Expo를 동기 조회한다. 동기 조회는 기존 회로 차단기·재시도를 그대로 쓴다.
+- 형식이 틀리거나 `schemaVersion`이 1이 아닌 메시지는 바로, 반영 실패(Redis 장애 등)는 `maxAttempts`번째에 원본을 `expo.expo.changed.dlq`로 옮긴다(헤더 `x-source-topic`, `x-error`). 실패 횟수는 인스턴스 메모리에서 센다.
+- 처음 켤 때·다시 만들 때: consumer를 띄운 뒤 Expo `POST /internal/expo-events/republish`를 호출한다. `expo.expo.changed.dlq` 토픽은 운영에서 미리 만든다.
+
 ## HTTP
 
 | 메서드 | 경로 | 설명 |
@@ -221,6 +233,12 @@ user:                                  # 이름 조회, 통째로 생략하면 �
 expo:                                  # 등록 인원 리포트의 박람회 목록과 문자 #{행사명}, 생략하면 리포트 생략·기본 행사명
   baseUrl: "http://<EXPO_HOST>:8080"
   internalToken: "…"                    # Vault, 32자 이상, Expo의 EXPO_INTERNAL_TOKEN과 같은 값
+expoProjection:                        # 박람회 프로젝션, 위 "박람회 프로젝션" 절
+  enabled: false                       # env KAFKA_EXPO_PROJECTION_ENABLED
+  topic: expo.expo.changed             # env KAFKA_EXPO_CHANGED_TOPIC
+  groupId: expo-notification-server.expo-changed   # env KAFKA_EXPO_PROJECTION_GROUP_ID
+  deadLetterTopic: expo.expo.changed.dlq           # env KAFKA_EXPO_CHANGED_DEAD_LETTER_TOPIC
+  maxAttempts: 5                       # env KAFKA_EXPO_PROJECTION_MAX_ATTEMPTS
 ```
 
 | 위치 | 키 |

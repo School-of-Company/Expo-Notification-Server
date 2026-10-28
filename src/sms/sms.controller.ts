@@ -13,7 +13,7 @@ import {
 import { z } from 'zod';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
-import { expoIdSchema } from '../common/expo-name.provider';
+import { expoIdSchema } from '../common/expo-internal-api';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { SmsAuthService } from './sms-auth.service';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';

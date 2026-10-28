@@ -113,6 +113,13 @@ function configFromEnv(env: Env): Record<string, unknown> {
         internalToken: env.EXPO_SERVICE_INTERNAL_TOKEN,
       }),
     }),
+    expoProjection: pickDefined({
+      enabled: env.KAFKA_EXPO_PROJECTION_ENABLED,
+      topic: env.KAFKA_EXPO_CHANGED_TOPIC,
+      groupId: env.KAFKA_EXPO_PROJECTION_GROUP_ID,
+      deadLetterTopic: env.KAFKA_EXPO_CHANGED_DEAD_LETTER_TOPIC,
+      maxAttempts: env.KAFKA_EXPO_PROJECTION_MAX_ATTEMPTS,
+    }),
     ...eurekaFromEnv(env),
     ...((env.PROMOTION_APPLICATION_URL || env.PROMOTION_ENABLED) && {
       promotion: {

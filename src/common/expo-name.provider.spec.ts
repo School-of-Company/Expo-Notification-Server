@@ -1,5 +1,14 @@
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
+import { AppConfig } from '../config/app-config';
+import type { ExpoProjectionStore } from '../expo-projection/expo-projection.store';
+import { ExpoReadProvider } from '../expo-projection/expo-read.provider';
 import { ExpoNameProvider } from './expo-name.provider';
+
+const create = (config: AppConfig) =>
+  new ExpoNameProvider(
+    config,
+    new ExpoReadProvider(config, {} as ExpoProjectionStore),
+  );
 
 const page = (content: { expoId: string; title: string }[]) =>
   Response.json({ content, hasNext: false });
@@ -12,7 +21,7 @@ describe('ExpoNameProvider', () => {
   beforeEach(() => {
     jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
     fetchSpy.mockReset();
-    provider = new ExpoNameProvider(config);
+    provider = create(config);
   });
   afterEach(() => jest.useRealTimers());
   afterAll(() => fetchSpy.mockRestore());
@@ -53,8 +62,45 @@ describe('ExpoNameProvider', () => {
     await expect(provider.titleOf('e1')).resolves.toBe('광주 박람회');
   });
 
+  describe('프로젝션이 켜져 있으면', () => {
+    const projectionConfig = createAppConfig({
+      expoProjection: { ...config.expoProjection, enabled: true },
+    });
+    const find = jest.fn();
+    const store = {
+      find,
+      isReady: jest.fn().mockResolvedValue(false),
+    } as unknown as ExpoProjectionStore;
+
+    beforeEach(() => {
+      find.mockReset();
+      provider = new ExpoNameProvider(
+        projectionConfig,
+        new ExpoReadProvider(projectionConfig, store),
+      );
+    });
+
+    it('캐시하지 않고 매번 프로젝션에서 읽어 바뀐 제목을 바로 쓴다', async () => {
+      find.mockResolvedValueOnce({ title: '광주 박람회', deleting: false });
+      find.mockResolvedValueOnce({ title: '바뀐 박람회', deleting: false });
+
+      await expect(provider.titleOf('e1')).resolves.toBe('광주 박람회');
+      await expect(provider.titleOf('e1')).resolves.toBe('바뀐 박람회');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('프로젝션에 없거나 조회가 실패하면 목록 조회로 넘어간다', async () => {
+      fetchSpy.mockResolvedValue(page([{ expoId: 'e1', title: '동기 제목' }]));
+      find.mockResolvedValueOnce(null);
+      find.mockRejectedValueOnce(new Error('redis down'));
+
+      await expect(provider.titleOf('e1')).resolves.toBe('동기 제목');
+      await expect(provider.titleOf('e1')).resolves.toBe('동기 제목');
+    });
+  });
+
   it('Expo 연결 설정이 없으면 조회하지 않는다', async () => {
-    provider = new ExpoNameProvider({ ...config, expo: undefined });
+    provider = create({ ...config, expo: undefined });
 
     await expect(provider.titleOf('e1')).resolves.toBe(config.sms.expoName);
     expect(fetchSpy).not.toHaveBeenCalled();
