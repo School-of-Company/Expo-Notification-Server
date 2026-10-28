@@ -9,7 +9,7 @@ const CACHE_TTL_MS = 10 * 60_000;
 @Injectable()
 export class ExpoNameProvider {
   private readonly logger = new Logger(ExpoNameProvider.name);
-  // ponytail: 목록 전체를 10분 캐시한다. 그 사이 새로 만든 박람회는 기본 행사명으로 나간다. 박람회가 수백 개가 되면 Expo에 단건 조회 API를 추가한다.
+  // ponytail: 동기 조회 경로만 목록 전체를 10분 캐시한다. 그 사이 새로 만든 박람회는 기본 행사명으로 나간다. 박람회가 수백 개가 되면 Expo에 단건 조회 API를 추가한다.
   private cache?: { at: number; titles: Promise<Map<string, string>> };
 
   constructor(
@@ -20,6 +20,15 @@ export class ExpoNameProvider {
   async titleOf(expoId: string | undefined): Promise<string> {
     const fallback = this.config.sms.expoName;
     if (!expoId || !this.expos.isConfigured()) return fallback;
+    // 프로젝션은 이벤트로 바로 갱신되므로 캐시하지 않고 매번 읽는다.
+    const projected = await this.expos.projectedTitle(expoId).catch((error) => {
+      this.logger.warn(
+        `박람회 프로젝션 조회 실패로 목록 조회: expoId=${expoId}`,
+        error instanceof Error ? error.message : undefined,
+      );
+      return undefined;
+    });
+    if (projected) return projected;
     if (!this.cache || Date.now() - this.cache.at >= CACHE_TTL_MS) {
       const titles = this.expos
         .activeExpos()

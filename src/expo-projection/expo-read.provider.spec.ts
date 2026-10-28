@@ -113,6 +113,18 @@ describe('ExpoReadProvider', () => {
       expect(store.findActive).not.toHaveBeenCalled();
     });
 
+    it('제목은 프로젝션에서 읽고 없거나 삭제 중이면 undefined다', async () => {
+      store.find.mockResolvedValueOnce(projected('a', '2030-01-01'));
+      store.find.mockResolvedValueOnce(
+        projected('b', '2030-01-01', { deleting: true }),
+      );
+
+      await expect(provider.projectedTitle('a')).resolves.toBe('박람회 a');
+      await expect(provider.projectedTitle('b')).resolves.toBeUndefined();
+      await expect(provider.projectedTitle('c')).resolves.toBeUndefined();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     it('회차는 프로젝션에서 읽는다', async () => {
       store.find.mockResolvedValue(projected('a', '2030-01-01'));
 

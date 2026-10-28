@@ -45,6 +45,13 @@ export class ExpoReadProvider {
       .map(({ expoId, title }) => ({ expoId, title }));
   }
 
+  /** 프로젝션에 있는 박람회의 제목. 꺼져 있거나 없거나 삭제 중이면 undefined라 호출자가 목록 조회로 넘어간다. */
+  async projectedTitle(expoId: string): Promise<string | undefined> {
+    if (!this.config.expoProjection.enabled) return undefined;
+    const expo = await this.projection.find(expoId);
+    return expo && !expo.deleting ? expo.title : undefined;
+  }
+
   async preregisterSessionTitles(expoId: string): Promise<Map<number, string>> {
     if (this.config.expoProjection.enabled) {
       const expo = await this.projection.find(expoId);
