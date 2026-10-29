@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import { mergeTargetDelta } from './admin-group-message-delta';
 import {
   GroupMessageRetryError,
   parseGroupMessageJob,
@@ -152,7 +153,7 @@ export class AdminGroupMessageStore {
       ? (result as [string | null, string[]])
       : [null, []];
     if (!raw) return null;
-    return parseGroupMessageJob(raw, delta);
+    return parseGroupMessageJob(mergeTargetDelta(raw, delta));
   }
 
   getJobForPreview(previewId: string): Promise<GroupMessageJob | null> {
