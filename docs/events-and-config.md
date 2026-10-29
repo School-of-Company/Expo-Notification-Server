@@ -226,6 +226,9 @@ kafka:
 redis:
   host: "<REDIS_HOST>"
   port: 6379
+  connectTimeoutMs: 2000               # env REDIS_CONNECT_TIMEOUT_MS
+  commandTimeoutMs: 2000               # env REDIS_COMMAND_TIMEOUT_MS
+  maxRetriesPerRequest: 1              # env REDIS_MAX_RETRIES_PER_REQUEST
 sms:                                   # 비밀 값은 Vault
   fromStandardNumber: "…"
   fromTraineeNumber: "…"
