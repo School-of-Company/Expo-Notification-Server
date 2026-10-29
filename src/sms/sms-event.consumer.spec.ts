@@ -234,3 +234,102 @@ describe('SmsEventConsumer', () => {
     expect(producer.disconnect).toHaveBeenCalled();
   });
 });
+
+describe('SmsEventConsumer 동시 처리 (consumerConcurrency>1)', () => {
+  type BatchHandler = (payload: never) => Promise<void>;
+  const setup = async (concurrency: number) => {
+    let eachBatch: BatchHandler | undefined;
+    const client = {
+      connect: jest.fn(),
+      subscribe: jest.fn(),
+      run: jest.fn((o: { eachBatch: BatchHandler }) => {
+        eachBatch = o.eachBatch;
+      }),
+      disconnect: jest.fn(),
+      commitOffsets: jest.fn(),
+    };
+    const producer = {
+      connect: jest.fn(),
+      send: jest.fn(),
+      disconnect: jest.fn(),
+    };
+    const kafka = {
+      consumer: jest.fn().mockReturnValue(client),
+      producer: jest.fn().mockReturnValue(producer),
+    };
+    const service = { handle: jest.fn() };
+    const guard = {
+      recordFailure: jest.fn().mockResolvedValue(1),
+      clearFailures: jest.fn().mockResolvedValue(undefined),
+    };
+    const base = createAppConfig();
+    await new SmsEventConsumer(
+      kafka as never,
+      { ...base, sms: { ...base.sms, consumerConcurrency: concurrency } },
+      guard as unknown as SmsEventGuard,
+      service as unknown as SmsEventService,
+    ).onApplicationBootstrap();
+    const resolveOffset = jest.fn<void, [string]>();
+    const run = (messages: unknown[]) =>
+      eachBatch!({
+        batch: { topic: 't', partition: 0, messages },
+        resolveOffset,
+        heartbeat: jest.fn(),
+        isRunning: () => true,
+        isStale: () => false,
+      } as never);
+    return { client, service, resolveOffset, run };
+  };
+  const msg = (offset: string, key: string | null, eventId: string) => ({
+    offset,
+    key: key ? Buffer.from(key) : null,
+    value: Buffer.from(JSON.stringify({ ...drawResult, eventId })),
+  });
+
+  it('키가 다른 메시지는 병렬로, 같은 키는 순서대로 처리하고 오프셋을 모두 resolve한다', async () => {
+    const { client, service, resolveOffset, run } = await setup(3);
+    const started: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    service.handle.mockImplementation(async (e: { eventId: string }) => {
+      started.push(e.eventId);
+      await gate;
+    });
+
+    const done = run([
+      msg('0', 'a', 'a1'),
+      msg('1', 'a', 'a2'),
+      msg('2', 'b', 'b1'),
+      msg('3', null, 'n1'),
+    ]);
+    await new Promise((r) => setImmediate(r));
+    // a2는 a1이 끝나기 전에 시작하지 않는다
+    expect(started.sort()).toEqual(['a1', 'b1', 'n1']);
+    release();
+    await done;
+
+    expect(started).toContain('a2');
+    expect(started.indexOf('a1')).toBeLessThan(started.indexOf('a2'));
+    expect(client.commitOffsets).toHaveBeenCalledTimes(1);
+    expect(resolveOffset.mock.calls.map((c: string[]) => c[0])).toEqual([
+      '0',
+      '1',
+      '2',
+      '3',
+    ]);
+  });
+
+  it('중간 메시지가 실패하면 앞에서부터 연속 성공한 오프셋까지만 resolve하고 던진다', async () => {
+    const { service, resolveOffset, run } = await setup(3);
+    const error = new Error('boom');
+    service.handle.mockImplementation((e: { eventId: string }) =>
+      e.eventId === 'b1' ? Promise.reject(error) : Promise.resolve(),
+    );
+
+    await expect(
+      run([msg('0', 'a', 'a1'), msg('1', 'b', 'b1'), msg('2', 'c', 'c1')]),
+    ).rejects.toBe(error);
+
+    expect(resolveOffset.mock.calls.map((c: string[]) => c[0])).toEqual(['0']);
+  });
+});
