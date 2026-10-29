@@ -256,22 +256,9 @@ export function parseGroupMessagePreviewRecord(
   }
 }
 
-// delta는 HGETALL 결과(targetId, JSON, ...). 본문의 같은 대상을 더 새 상태로 덮어쓴다. 없으면 이전 레이아웃 job 그대로다.
-export function parseGroupMessageJob(
-  raw: string,
-  delta: readonly string[] = [],
-): GroupMessageJob {
+export function parseGroupMessageJob(raw: string): GroupMessageJob {
   try {
     const body: unknown = JSON.parse(raw);
-    if (delta.length > 0 && typeof body === 'object' && body !== null) {
-      const latest = new Map<string, unknown>();
-      for (let index = 0; index + 1 < delta.length; index += 2)
-        latest.set(delta[index], JSON.parse(delta[index + 1]));
-      const record = body as { targets?: Array<{ targetId?: string }> };
-      record.targets = record.targets?.map(
-        (target) => latest.get(target.targetId ?? '') ?? target,
-      );
-    }
     return groupMessageJobSchema.parse(body);
   } catch {
     throw new GroupMessageRetryError();
