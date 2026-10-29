@@ -17,7 +17,13 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         participantRegistered: 'user.participant.registered',
       },
     },
-    redis: { host: 'localhost', port: 6379 },
+    redis: {
+      host: 'localhost',
+      port: 6379,
+      connectTimeoutMs: 2000,
+      commandTimeoutMs: 2000,
+      maxRetriesPerRequest: 1,
+    },
     sms: {
       apiKey: 'key',
       apiSecret: 'secret',
@@ -29,6 +35,7 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       authMaxInternalSendCountPerHour: 300,
       authCodeLength: 4,
       eventMaxAttempts: 5,
+      consumerConcurrency: 1,
       expoName: '광주 박람회',
       drawPrizePlace: '입구 운영본부',
       applicationResult: { maxAgeSeconds: 86_400 },

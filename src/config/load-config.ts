@@ -71,6 +71,9 @@ function configFromEnv(env: Env): Record<string, unknown> {
       host: env.REDIS_HOST,
       port: env.REDIS_PORT,
       password: env.REDIS_PASSWORD,
+      connectTimeoutMs: env.REDIS_CONNECT_TIMEOUT_MS,
+      commandTimeoutMs: env.REDIS_COMMAND_TIMEOUT_MS,
+      maxRetriesPerRequest: env.REDIS_MAX_RETRIES_PER_REQUEST,
     }),
     sms: pickDefined({
       apiKey: env.SMS_API_KEY,
@@ -85,6 +88,7 @@ function configFromEnv(env: Env): Record<string, unknown> {
       authInternalToken: env.SMS_AUTH_INTERNAL_TOKEN,
       authCodeLength: env.SMS_AUTH_CODE_LENGTH,
       eventMaxAttempts: env.SMS_EVENT_MAX_ATTEMPTS,
+      consumerConcurrency: env.SMS_CONSUMER_CONCURRENCY,
       expoName: env.SMS_EXPO_NAME,
       drawPrizePlace: env.SMS_DRAW_PRIZE_PLACE,
       qrUrlTemplate: env.SMS_QR_URL_TEMPLATE,
