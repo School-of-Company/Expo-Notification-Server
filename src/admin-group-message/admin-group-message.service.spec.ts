@@ -63,10 +63,21 @@ describe('AdminGroupMessageService processing safety', () => {
     template: GroupKakaoTemplate = nameTemplate,
   ) {
     const save = jest.fn().mockResolvedValue(undefined);
+    // 호출 시점 상태를 남긴다(처리 중 같은 객체를 계속 바꾸므로).
+    const targetSnapshots: string[] = [];
+    const saveTarget = jest
+      .fn()
+      .mockImplementation(
+        (_jobId: string, _token: string, saved: { status: string }) => {
+          targetSnapshots.push(saved.status);
+          return Promise.resolve();
+        },
+      );
     const store = {
       claim: jest.fn().mockResolvedValue('lock'),
       getJob: jest.fn().mockResolvedValue(record),
       save,
+      saveTarget,
       release: jest.fn().mockResolvedValue(undefined),
     };
     const send = jest.fn().mockResolvedValue({
@@ -101,6 +112,8 @@ describe('AdminGroupMessageService processing safety', () => {
       send,
       delivery,
       save,
+      saveTarget,
+      targetSnapshots,
       service: new AdminGroupMessageService(
         config,
         store as unknown as AdminGroupMessageStore,
@@ -132,7 +145,7 @@ describe('AdminGroupMessageService processing safety', () => {
       'fallbackToSms=%s여도 문자 접수·저장 뒤 같은 문구의 카톡(disableSms: true)을 한 건 보낸다',
       async (fallbackToSms) => {
         const record = kakaoJob(fallbackToSms);
-        const { service, send, save } = setup(record);
+        const { service, send, save, saveTarget } = setup(record);
         const fetch = mockKakaoFetch();
 
         await service.process(record.jobId);
@@ -160,7 +173,7 @@ describe('AdminGroupMessageService processing safety', () => {
             },
           },
         ]);
-        expect(save.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        expect(saveTarget.mock.invocationCallOrder.at(-1)).toBeLessThan(
           fetch.mock.invocationCallOrder[0],
         );
         expect(savedTarget(save)).toMatchObject({
@@ -280,6 +293,50 @@ describe('AdminGroupMessageService processing safety', () => {
       }),
       'lock',
     );
+  });
+
+  it('여러 대상을 한 묶음으로 처리하며 대상마다 전체 job이 아니라 대상 1건만 저장한다', async () => {
+    const targets = [1, 2, 3].map((n) => ({
+      ...target('PENDING'),
+      targetId: `target-${n}`,
+    }));
+    const record = job(targets);
+    const { service, send, save, saveTarget, store, targetSnapshots } =
+      setup(record);
+    await expect(service.process(record.jobId)).resolves.toBe(false);
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(store.getJob).toHaveBeenCalledTimes(1);
+    // 대상마다 SENDING, 결과 두 번. 전체 저장은 묶음 끝에 한 번.
+    expect(saveTarget).toHaveBeenCalledTimes(6);
+    expect(save).toHaveBeenCalledTimes(1);
+    const sendingOrder = saveTarget.mock.invocationCallOrder[0];
+    expect(sendingOrder).toBeLessThan(send.mock.invocationCallOrder[0]);
+    expect(targetSnapshots).toEqual(
+      targets.flatMap(() => ['SENDING', 'ACCEPTED']),
+    );
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'RUNNING',
+        targets: [
+          expect.objectContaining({ status: 'ACCEPTED' }),
+          expect.objectContaining({ status: 'ACCEPTED' }),
+          expect.objectContaining({ status: 'ACCEPTED' }),
+        ],
+      }),
+      'lock',
+    );
+  });
+
+  it('묶음 크기를 넘는 대기 대상은 남겨 두고 true를 돌려준다', async () => {
+    const record = job(
+      Array.from({ length: 25 }, (_, n) => ({
+        ...target('PENDING'),
+        targetId: `target-${n}`,
+      })),
+    );
+    const { service, send } = setup(record);
+    await expect(service.process(record.jobId)).resolves.toBe(true);
+    expect(send).toHaveBeenCalledTimes(20);
   });
 
   it('sends pending targets before polling accepted targets', async () => {

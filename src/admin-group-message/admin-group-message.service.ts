@@ -27,6 +27,9 @@ import {
   groupTemplateVariables,
 } from './group-message-sender.interface';
 
+// ponytail: 묶음 안에서는 Solapi를 여전히 한 명씩 호출한다(멱등·SENDING 단위 유지). 다건 발송은 별도 과제.
+const PROCESS_BATCH_SIZE = 20;
+
 @Injectable()
 export class AdminGroupMessageService {
   constructor(
@@ -172,8 +175,8 @@ export class AdminGroupMessageService {
         await this.store.save(job, token);
         return false;
       }
-      const pending = job.targets.find((target) => target.status === 'PENDING');
-      if (!pending) {
+      let index = this.nextPending(job, 0);
+      if (index < 0) {
         const accepted = job.targets
           .filter((target) => target.status === 'ACCEPTED')
           .sort((left, right) =>
@@ -192,60 +195,75 @@ export class AdminGroupMessageService {
         await this.store.save(job, token);
         return false;
       }
-      if (Date.now() >= Date.parse(job.authorizedUntil)) {
-        job.status = 'PAUSED';
-        job.reason = 'AUTHORIZATION_EXPIRED';
-        await this.store.save(job, token, 0);
-        return false;
-      }
-      if (!this.sendConfigurationAvailable(job, pending)) {
-        job.status = 'PAUSED';
-        job.reason = 'CHANNEL_CONFIGURATION_UNAVAILABLE';
-        await this.store.save(job, token, 0);
-        return false;
-      }
-      const sending: GroupMessageTargetRecord = {
-        ...pending,
-        status: 'SENDING',
-        attemptId: randomUUID(),
-        attemptedAt: new Date().toISOString(),
-        providerCode: undefined,
-        failureReason: undefined,
-      };
-      job.targets[job.targets.indexOf(pending)] = sending;
-      job.status = 'RUNNING';
-      await this.store.save(job, token, Date.now());
-      const receipt = await this.sender.send(job, sending);
-      if (receipt.kind === 'accepted') {
-        sending.status = 'ACCEPTED';
-        sending.groupId = receipt.groupId;
-        sending.messageId = receipt.messageId;
-      } else if (receipt.kind === 'rejected') {
-        sending.status = 'FAILED';
-        sending.providerCode = receipt.code;
-        sending.failureReason = 'PROVIDER_CONFIRMED_FAILURE';
-      } else {
-        sending.status = 'UNKNOWN';
-        sending.failureReason = 'PROVIDER_ACCEPTANCE_UNKNOWN';
+      // 한 번 claim으로 최대 PROCESS_BATCH_SIZE명을 처리한다. 대상별 상태는 saveTarget(O(1))으로만 쓰고,
+      // 전체 job은 읽기·저장을 묶음당 한 번만 한다. SENDING 기록이 발송보다 먼저라 중단 시 재발송하지 않는다.
+      for (let handled = 0; ;) {
+        const pending = job.targets[index];
+        if (Date.now() >= Date.parse(job.authorizedUntil)) {
+          job.status = 'PAUSED';
+          job.reason = 'AUTHORIZATION_EXPIRED';
+          await this.store.save(job, token, 0);
+          return false;
+        }
+        if (!this.sendConfigurationAvailable(job, pending)) {
+          job.status = 'PAUSED';
+          job.reason = 'CHANNEL_CONFIGURATION_UNAVAILABLE';
+          await this.store.save(job, token, 0);
+          return false;
+        }
+        const sending: GroupMessageTargetRecord = {
+          ...pending,
+          status: 'SENDING',
+          attemptId: randomUUID(),
+          attemptedAt: new Date().toISOString(),
+          providerCode: undefined,
+          failureReason: undefined,
+        };
+        job.targets[index] = sending;
+        job.status = 'RUNNING';
+        await this.store.saveTarget(jobId, token, sending);
+        const receipt = await this.sender.send(job, sending);
+        if (receipt.kind === 'accepted') {
+          sending.status = 'ACCEPTED';
+          sending.groupId = receipt.groupId;
+          sending.messageId = receipt.messageId;
+        } else if (receipt.kind === 'rejected') {
+          sending.status = 'FAILED';
+          sending.providerCode = receipt.code;
+          sending.failureReason = 'PROVIDER_CONFIRMED_FAILURE';
+        } else {
+          sending.status = 'UNKNOWN';
+          sending.failureReason = 'PROVIDER_ACCEPTANCE_UNKNOWN';
+        }
+        await this.store.saveTarget(jobId, token, sending);
+        // ACCEPTED를 저장한 뒤에 보낸다. 상태·전달 확인은 문자 messageId만 따르고, 카톡 실패는 재시도하지 않는다.
+        const kakaoMessage =
+          receipt.kind === 'accepted'
+            ? groupKakaoMessage(this.config, job, sending)
+            : undefined;
+        if (kakaoMessage && sending.attemptId) {
+          await this.kakao.send([kakaoMessage], {
+            jobId: job.jobId,
+            targetId: sending.targetId,
+            attemptId: sending.attemptId,
+          });
+        }
+        handled += 1;
+        index = this.nextPending(job, index + 1);
+        if (index < 0 || handled >= PROCESS_BATCH_SIZE) break;
       }
       job.status = this.jobStatus(job);
       await this.store.save(job, token);
-      // ACCEPTED를 저장한 뒤에 보낸다. 상태·전달 확인은 문자 messageId만 따르고, 카톡 실패는 재시도하지 않는다.
-      const kakaoMessage =
-        receipt.kind === 'accepted'
-          ? groupKakaoMessage(this.config, job, sending)
-          : undefined;
-      if (kakaoMessage && sending.attemptId) {
-        await this.kakao.send([kakaoMessage], {
-          jobId: job.jobId,
-          targetId: sending.targetId,
-          attemptId: sending.attemptId,
-        });
-      }
-      return job.targets.some((target) => target.status === 'PENDING');
+      return index >= 0;
     } finally {
       await this.store.release(jobId, token);
     }
+  }
+
+  private nextPending(job: GroupMessageJob, from: number): number {
+    for (let index = from; index < job.targets.length; index += 1)
+      if (job.targets[index].status === 'PENDING') return index;
+    return -1;
   }
 
   private async checkDelivery(
