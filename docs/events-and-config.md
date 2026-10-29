@@ -22,6 +22,16 @@ User 서비스가 일반 PRE/FIELD 신규 등록, 허용된 QR 재발송(어드�
 
 이름은 이벤트에서 읽지 않는다. 이름 조회 요청은 `{expoId, participantIds}`, 응답은 요청 순서대로 `[{participantId,name}]`다. 링크가 둘 이상일 때 이름이 있으면 `이름(대표자): 링크` / `이름: 링크`, 없으면 `대표자: 링크` / `동행자 1: 링크`를 사용한다. 이름 API 미설정, 404/401/5xx, 연결/JSON 실패, 잘못된 ID/순서/이름 응답은 전체 이름을 역할 라벨로 대체하고 발송을 계속한다. 선택 조회가 발송을 오래 막지 않게 공통 HTTP 기본 10초 대신 2초 timeout을 적용한다. 이름/전화번호/code/완성 링크나 원문 응답/오류는 QR 처리 로그에 남기지 않는다.
 
+### QR 문자의 신청 내역 (#136)
+
+`sms.qrNotice.enabled`(env `SMS_QR_NOTICE_ENABLED`, 기본 `false`)를 켜면 STANDARD QR 문자에 참가자별로 확정된 사전등록 회차와 신청 프로그램을 더한다. 문구는 문자에만 들어가고, 알림톡은 카카오 승인 본문(링크만) 그대로 보낸다. 재승인 뒤 문자·알림톡을 함께 바꾼다.
+
+- Application `POST /internal/expos/{expoId}/participants/notice-items` (`X-Internal-Token`, Application #372 계약)에 `{participantIds}`를 보내고, 응답은 요청 순서대로 `[{participantId, sessions:[{title, startedAt?, endedAt?, place?}], programs:[{programType, title, startedAt?, endedAt?, location?}]}]`다. 이름 조회와 함께 병렬로 부르고 2초 timeout을 둔다. 연결은 알림 리포트처럼 `promotionOffer.application` 또는 `promotion.application`을 재사용한다.
+- 꺼져 있거나 Application 연결이 없거나 404/5xx, 연결·JSON 실패, 잘못된 개수/순서/값 응답이면 지금처럼 링크만 보내고 발송은 계속한다. 응답 원문과 오류는 로그에 남기지 않는다.
+- 본문은 `▶ 신청 확인` 링크 뒤에 `▶ 신청 내역`을 붙인다. 링크가 하나면 `회차:`·`프로그램:` 줄만, 동행자가 있으면 `■ 이름` 아래에 묶는다. 일시는 한국 시간 `10/31 10:00~12:00`이다. 내역이 없는 사람은 건너뛴다.
+- 문자 본문이 2,000바이트(LMS)를 넘으면 프로그램을 빼고 회차만 보내고, 그래도 넘으면 링크만 보낸다. 링크만 보내는 본문이 넘으면 지금처럼 미발송이다.
+- 알림톡의 1,000자 판정은 승인 본문(링크만) 기준이다.
+
 ### QR 링크 설정과 미발송 정책
 
 - STANDARD: `sms.qrUrlTemplate` / `SMS_QR_URL_TEMPLATE`
@@ -227,6 +237,8 @@ sms:                                   # 비밀 값은 Vault
   drawPrizePlace: "입구 운영본부"        # 당첨 안내(K4)의 #{장소}, env SMS_DRAW_PRIZE_PLACE
   qrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&code={code}"   # 필수
   traineeQrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&phoneNumber={phoneNumber}"   # 필수
+  qrNotice:
+    enabled: false                     # QR 문자에 회차·프로그램 추가(#136), env SMS_QR_NOTICE_ENABLED. Application #372 배포 뒤에 켠다
 user:                                  # 이름 조회, 통째로 생략하면 역할 라벨
   baseUrl: "http://<USER_HOST>:8080"
   internalToken: "…"                    # Vault, 32자 이상

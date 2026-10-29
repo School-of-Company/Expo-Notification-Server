@@ -5,6 +5,11 @@ import { ExpoNameProvider } from '../common/expo-name.provider';
 import { kakaoOptionsFor } from './kakao-message';
 import { KakaoSenderProvider } from './kakao-sender.provider';
 import { ParticipantNamesProvider } from './participant-names.provider';
+import {
+  ParticipantNoticeProvider,
+  type ParticipantNotice,
+} from './participant-notice.provider';
+import { renderQrSmsWithNotices } from './qr-notice-message';
 import { buildQrPageLinks } from './qr-page-links';
 import { ParticipantRegisteredEvent } from './participant-event.schema';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
@@ -28,6 +33,7 @@ export class QrSmsService {
     private readonly guard: SmsEventGuard,
     private readonly dedupe: SmsEventDedupeStore,
     private readonly names: ParticipantNamesProvider,
+    private readonly notices: ParticipantNoticeProvider,
     private readonly sender: SmsSenderProvider,
     private readonly kakao: KakaoSenderProvider,
     private readonly sentPublisher: QrSmsSentPublisher,
@@ -41,36 +47,54 @@ export class QrSmsService {
       : this.config.sms.traineeQrUrlTemplate;
     const result = await this.guard.once(event.eventId, async (beginSend) => {
       const links = buildQrPageLinks(template, event);
-      const names = standard
-        ? await this.names.findNames({
-            expoId: event.expoId,
-            participantIds: links.map(({ id }) => id),
-          })
-        : new Map<number, string>();
+      const participantIds = links.map(({ id }) => id);
+      // 이름과 신청 내역은 서로 기다리지 않고 함께 조회한다. 둘 다 부가 정보라 실패해도 발송은 계속한다.
+      const [names, notices] = standard
+        ? await Promise.all([
+            this.names.findNames({ expoId: event.expoId, participantIds }),
+            this.notices.findNotices({ expoId: event.expoId, participantIds }),
+          ])
+        : [
+            new Map<number, string>(),
+            new Map<number, ParticipantNotice>() as ReadonlyMap<
+              number,
+              ParticipantNotice
+            >,
+          ];
       let companionNumber = 0;
-      const { text, variables } = renderQrSms({
-        expoName: await this.expoNames.titleOf(event.expoId),
-        links: links.map(({ id, url }) => {
-          const representative = id === (event.representativeId ?? event.id);
-          const name = names.get(id);
-          let label = '연수자';
-          if (standard) {
-            if (representative) {
-              label = name ? `${name}(대표자)` : '대표자';
-            } else {
-              companionNumber += 1;
-              label = name ?? `동행자 ${companionNumber}`;
-            }
+      const expoName = await this.expoNames.titleOf(event.expoId);
+      const renderedLinks = links.map(({ id, url }) => {
+        const representative = id === (event.representativeId ?? event.id);
+        const name = names.get(id);
+        let label = '연수자';
+        if (standard) {
+          if (representative) {
+            label = name ? `${name}(대표자)` : '대표자';
+          } else {
+            companionNumber += 1;
+            label = name ?? `동행자 ${companionNumber}`;
           }
-          return { label, url };
-        }),
+        }
+        return { label, url };
       });
-      if (Buffer.byteLength(text, 'utf8') > 2_000) {
+      // 알림톡은 승인된 링크 본문 그대로다. 문자만 선택한 회차·프로그램 줄을 더한다(#136).
+      const { text: linkOnlyText, variables } = renderQrSms({
+        expoName,
+        links: renderedLinks,
+      });
+      if (Buffer.byteLength(linkOnlyText, 'utf8') > 2_000) {
         throw new QrLinkError('QR SMS exceeds single LMS byte limit');
       }
+      const text = renderQrSmsWithNotices({
+        linkOnlyText,
+        expoName,
+        links: renderedLinks,
+        linkIds: participantIds,
+        notices,
+      });
       // 알림톡 본문은 1,000자까지다. 동행자가 많아 넘으면 카톡은 빼고 문자로만 보낸다.
       const kakaoOptions =
-        Array.from(text).length <= 1_000
+        Array.from(linkOnlyText).length <= 1_000
           ? kakaoOptionsFor(
               this.config,
               this.config.kakao?.auto.qrRegistered,
@@ -94,9 +118,12 @@ export class QrSmsService {
       }
       // 문자가 접수된 뒤에만 보내고 던지지 않는다. 카톡 결과는 재전달 여부에 영향을 주지 않는다.
       if (kakaoOptions) {
-        await this.kakao.send([{ ...message, kakaoOptions }], {
-          eventId: event.eventId,
-        });
+        await this.kakao.send(
+          [{ ...message, text: linkOnlyText, kakaoOptions }],
+          {
+            eventId: event.eventId,
+          },
+        );
       }
     });
 
