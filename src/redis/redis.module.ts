@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { AppConfig } from '../config/app-config';
 import { REDIS_CLIENT } from './redis.constants';
+import { buildRedisOptions } from './redis-options';
 
 @Global()
 @Module({
@@ -11,11 +12,7 @@ import { REDIS_CLIENT } from './redis.constants';
       provide: REDIS_CLIENT,
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) =>
-        new Redis({
-          host: config.redis.host,
-          port: config.redis.port,
-          password: config.redis.password,
-        }),
+        new Redis(buildRedisOptions(config.redis)),
     },
   ],
   exports: [REDIS_CLIENT],

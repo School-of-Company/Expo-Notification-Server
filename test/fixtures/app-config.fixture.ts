@@ -17,7 +17,13 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
         participantRegistered: 'user.participant.registered',
       },
     },
-    redis: { host: 'localhost', port: 6379 },
+    redis: {
+      host: 'localhost',
+      port: 6379,
+      connectTimeoutMs: 2000,
+      commandTimeoutMs: 2000,
+      maxRetriesPerRequest: 1,
+    },
     sms: {
       apiKey: 'key',
       apiSecret: 'secret',
