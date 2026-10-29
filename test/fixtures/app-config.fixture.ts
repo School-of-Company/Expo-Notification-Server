@@ -29,6 +29,7 @@ export function createAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       authMaxInternalSendCountPerHour: 300,
       authCodeLength: 4,
       eventMaxAttempts: 5,
+      consumerConcurrency: 1,
       expoName: '광주 박람회',
       drawPrizePlace: '입구 운영본부',
       applicationResult: { maxAgeSeconds: 86_400 },

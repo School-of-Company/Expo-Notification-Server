@@ -85,6 +85,7 @@ function configFromEnv(env: Env): Record<string, unknown> {
       authInternalToken: env.SMS_AUTH_INTERNAL_TOKEN,
       authCodeLength: env.SMS_AUTH_CODE_LENGTH,
       eventMaxAttempts: env.SMS_EVENT_MAX_ATTEMPTS,
+      consumerConcurrency: env.SMS_CONSUMER_CONCURRENCY,
       expoName: env.SMS_EXPO_NAME,
       drawPrizePlace: env.SMS_DRAW_PRIZE_PLACE,
       qrUrlTemplate: env.SMS_QR_URL_TEMPLATE,

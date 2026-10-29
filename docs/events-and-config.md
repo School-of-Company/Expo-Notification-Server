@@ -128,6 +128,8 @@ Redis 키, processing/done 상태 및 TTL 인자는 기존 `sms-stores.spec.ts`�
 
 **DLQ** (두 SMS 소비 토픽 공통): 같은 이벤트 처리가 `sms.eventMaxAttempts`(기본 5)번 실패하면 원본 메시지를 `notification.sms.requested.dlq`로 옮기고(`x-source-topic` 헤더에 출처 토픽) 다음 메시지로 넘어간다.
 유효한 메시지는 처리 전에 현재 오프셋(다음 오프셋이 아님)을 커밋한다. 첫 메시지가 실패하여 consumer가 재시작되어도 `fromBeginning: false`가 최신 위치로 이동해 해당 메시지를 건너뛰지 않도록 한다. 성공 또는 DLQ 이동 후의 다음 오프셋 커밋은 KafkaJS가 수행한다.
+**동시 처리**: `sms.consumerConcurrency`(기본 1)가 2 이상이면 `eachBatch`로 전환해 파티션 안에서 키가 다른 메시지를 최대 그 수만큼 병렬 처리한다(운영 파티션이 1개라 `partitionsConsumedConcurrently`로는 늘지 않는다). 같은 키는 순서대로 직렬이며, 실패 시 앞에서부터 연속 성공한 오프셋까지만 resolve하고 던진다(뒤쪽 성공분은 재전달되나 dedupe가 막는다). 배치당 첫 메시지의 현재 오프셋을 한 번 커밋한다. Solapi 레이트리밋을 확인한 뒤 올린다.
+
 DLQ로 옮길 때 이벤트별 실패 카운터를 지워서, 재처리한 메시지가 첫 실패에 곧바로 다시 DLQ로 가지 않는다. 연수 CUSTOM은 2026-10-12 Expo 담당자 합의에 따라 원인 해결 후 최초 Notification 처리 시도부터 7일 미만에 원본 `eventId`와 JSON을 유지하여 원 토픽으로 수동 재처리한다. 7일 이상 지났거나 최초 처리 시각을 확인할 수 없는 건은 담당자가 발송 이력과 중복 영향을 수동 판단한다. DLQ 보관 기간은 재처리 허용 기간이 아니다. DLQ 발행까지 실패하면 던져서 이벤트를 잃지 않는다.
 DLQ 전송이 성공한 뒤 카운터 정리가 실패하면 경고를 남기고 원본 처리를 끝낸다. 정리 실패 시 잔존 카운터 때문에 수동 재처리가 조기에 다시 DLQ로 갈 수 있으므로 재처리 전에 해당 실패 카운터를 확인한다.
 
@@ -233,6 +235,7 @@ sms:                                   # 비밀 값은 Vault
   authMaxInternalSendCountPerHour: 300 # 내부 토큰(User 참가자 인증) 버킷
   authCodeLength: 4                    # 4 또는 6. User·클라이언트가 6자리를 받게 된 뒤 6으로 올린다
   eventMaxAttempts: 5
+  consumerConcurrency: 1               # env SMS_CONSUMER_CONCURRENCY. 파티션 안 동시 처리 수(1=순차)
   authMaxVerifyAttemptCount: 5
   drawPrizePlace: "입구 운영본부"        # 당첨 안내(K4)의 #{장소}, env SMS_DRAW_PRIZE_PLACE
   qrUrlTemplate: "https://<Client 도메인>/qr?expoId={expoId}&type={participationType}&id={id}&code={code}"   # 필수

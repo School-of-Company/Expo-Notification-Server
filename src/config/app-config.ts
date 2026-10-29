@@ -130,6 +130,8 @@ const baseAppConfigSchema = z.object({
       .pipe(z.union([z.literal(4), z.literal(6)]))
       .default(4),
     eventMaxAttempts: z.coerce.number().int().positive().default(5),
+    // 파티션 안에서 동시에 처리할 이벤트 수(키 다르면 병렬). 1이면 기존 순차 처리
+    consumerConcurrency: z.coerce.number().int().min(1).max(50).default(1),
     expoName: z.string().min(1).default('AI 미래교육 페스타'),
     // 당첨 안내(K4)의 #{장소}.
     drawPrizePlace: z.string().min(1).default('입구 운영본부'),
