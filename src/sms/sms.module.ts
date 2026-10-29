@@ -6,6 +6,7 @@ import { APP_CONFIG } from '../config/app-config.constants';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { KakaoSenderProvider } from './kakao-sender.provider';
 import { ParticipantNamesProvider } from './participant-names.provider';
+import { ParticipantNoticeProvider } from './participant-notice.provider';
 import { ParticipantRegisteredConsumer } from './participant-registered.consumer';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { QrSmsService } from './qr-sms.service';
@@ -38,6 +39,7 @@ import { SmsController } from './sms.controller';
     SmsEventService,
     SmsEventGuard,
     ParticipantNamesProvider,
+    ParticipantNoticeProvider,
     QrSmsSentPublisher,
     QrSmsService,
     SmsEventConsumer,

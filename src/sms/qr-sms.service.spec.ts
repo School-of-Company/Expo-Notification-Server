@@ -12,6 +12,7 @@ import {
 import { KakaoSenderProvider } from './kakao-sender.provider';
 import type { ParticipantRegisteredEvent } from './participant-event.schema';
 import { ParticipantNamesProvider } from './participant-names.provider';
+import { ParticipantNoticeProvider } from './participant-notice.provider';
 import { QrSmsSentPublisher } from './qr-sms-sent.publisher';
 import { QrSmsService } from './qr-sms.service';
 import {
@@ -34,6 +35,13 @@ const standard: ParticipantRegisteredEvent = {
   phoneNumber: '01012345678',
   participants: [{ id: 42, code: 'a'.repeat(22) }],
 };
+
+const urlOf = (input: Parameters<typeof fetch>[0]): string =>
+  typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
 
 describe('QrSmsService', () => {
   const config = createAppConfig();
@@ -78,6 +86,7 @@ describe('QrSmsService', () => {
         SmsEventDedupeStore,
         SmsEventGuard,
         ParticipantNamesProvider,
+        ParticipantNoticeProvider,
         SmsSenderProvider,
         KakaoSenderProvider,
         QrSmsService,
@@ -88,6 +97,83 @@ describe('QrSmsService', () => {
   });
   afterAll(() => globalFetch.mockRestore());
   const text = () => send.mock.calls[0]?.[0][0]?.text ?? '';
+
+  describe('신청 내역(#136)', () => {
+    const detail = [
+      {
+        participantId: 42,
+        sessions: [
+          {
+            title: '10월 31일 오전',
+            startedAt: '2026-10-31T10:00:00+09:00',
+            endedAt: '2026-10-31T12:00:00+09:00',
+            place: '1관',
+          },
+        ],
+        programs: [{ programType: 'STANDARD', title: '로봇 체험' }],
+      },
+    ];
+    // 이름 조회와 신청 내역 조회를 URL로 구분해 응답한다.
+    const respond = (notice: () => Response) =>
+      fetchSpy.mockImplementation((input) =>
+        Promise.resolve(
+          urlOf(input).endsWith('/notice-items')
+            ? notice()
+            : Response.json([{ participantId: 42, name: '홍길동' }]),
+        ),
+      );
+    const enable = () => {
+      config.sms = { ...config.sms, qrNotice: { enabled: true } };
+      config.promotion = {
+        application: {
+          baseUrl: 'http://application.test',
+          internalToken: 'b'.repeat(32),
+        },
+      } as unknown as typeof config.promotion;
+    };
+    afterEach(() => {
+      config.promotion = undefined;
+    });
+
+    it('켜져 있으면 문자에만 회차와 프로그램 줄을 더하고 알림톡은 승인 본문 그대로 보낸다', async () => {
+      enable();
+      config.kakao = { pfId: 'pf-1', auto: { qrRegistered: 'k2' } };
+      respond(() => Response.json(detail));
+
+      await service.handle(standard);
+
+      expect(text()).toContain(
+        '▶ 신청 내역\n회차: 10월 31일 오전 10/31 10:00~12:00 @1관\n프로그램: 로봇 체험',
+      );
+      expect(text().endsWith('신청자에게 발송되었습니다.')).toBe(true);
+      const kakao = send.mock.calls[1]?.[0][0];
+      expect(kakao?.text).not.toContain('신청 내역');
+      expect(JSON.stringify(kakao)).toContain('"#{URL}"');
+      expect(JSON.stringify(kakao)).not.toContain('신청 내역');
+    });
+
+    it('신청 내역 조회가 실패하면 링크만 보내고 발송은 계속한다', async () => {
+      enable();
+      respond(() => new Response('{}', { status: 503 }));
+
+      await service.handle(standard);
+
+      expect(text()).not.toContain('신청 내역');
+      expect(text()).toContain('▶ 신청 확인(QR확인): https://expo.test/qr');
+      expect(publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('꺼져 있으면 신청 내역을 조회하지 않는다', async () => {
+      await service.handle(standard);
+
+      expect(
+        fetchSpy.mock.calls.some(([url]) =>
+          urlOf(url).endsWith('/notice-items'),
+        ),
+      ).toBe(false);
+      expect(text()).not.toContain('신청 내역');
+    });
+  });
 
   describe('알림톡(K2)', () => {
     const expected =

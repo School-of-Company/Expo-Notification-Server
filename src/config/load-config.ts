@@ -89,6 +89,9 @@ function configFromEnv(env: Env): Record<string, unknown> {
       drawPrizePlace: env.SMS_DRAW_PRIZE_PLACE,
       qrUrlTemplate: env.SMS_QR_URL_TEMPLATE,
       traineeQrUrlTemplate: env.SMS_TRAINEE_QR_URL_TEMPLATE,
+      ...(env.SMS_QR_NOTICE_ENABLED && {
+        qrNotice: { enabled: env.SMS_QR_NOTICE_ENABLED },
+      }),
       authMaxVerifyAttemptCount: env.SMS_AUTH_MAX_VERIFY_ATTEMPT_COUNT,
       apiBaseUrl: env.SMS_API_BASE_URL,
       ...((env.SMS_APPLICATION_RESULT_EXPO_IDS ||

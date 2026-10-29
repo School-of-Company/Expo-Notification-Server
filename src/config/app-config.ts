@@ -141,6 +141,16 @@ const baseAppConfigSchema = z.object({
         maxAgeSeconds: z.coerce.number().int().positive().default(86_400),
       })
       .prefault({}),
+    // QR 문자에 선택한 회차와 신청 프로그램을 함께 싣는다(#136). Application의 읽기 API가 배포된 뒤에 켠다.
+    // 꺼져 있으면 지금처럼 링크만 보낸다. 켜도 조회가 실패하면 링크만 보낸다.
+    qrNotice: z
+      .object({
+        enabled: z
+          .stringbool({ truthy: ['true'], falsy: ['false'] })
+          .or(z.boolean())
+          .default(false),
+      })
+      .prefault({}),
     // 비어 있으면 등록 이벤트를 커밋만 하고 QR 문자를 영구히 못 보내므로 부팅에서 막는다.
     qrUrlTemplate: z.string().trim().min(1),
     traineeQrUrlTemplate: z.string().trim().min(1),
