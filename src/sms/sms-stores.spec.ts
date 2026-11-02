@@ -153,11 +153,36 @@ describe('SmsEventDedupeStore', () => {
     await expect(store.claim('e1')).resolves.toBe('claimed');
     expect(redis.set).toHaveBeenCalledWith(
       'sms:event:e1',
-      'processing',
+      expect.stringMatching(/^processing:.+/),
       'EX',
       300,
       'NX',
     );
+  });
+
+  it('SET NX가 적용된 뒤 타임아웃으로 실패해도 다시 읽어 내 토큰이면 claimed', async () => {
+    redis.set.mockRejectedValueOnce(new Error('Command timed out'));
+    redis.get.mockImplementationOnce(() =>
+      Promise.resolve((redis.set.mock.calls[0] as string[])[1]),
+    );
+
+    await expect(store.claim('e1')).resolves.toBe('claimed');
+  });
+
+  it('타임아웃 뒤 다른 처리의 선점이 보이면 in-progress', async () => {
+    redis.set.mockRejectedValueOnce(new Error('Command timed out'));
+    redis.get.mockResolvedValue('processing:other');
+
+    await expect(store.claim('e1')).resolves.toBe('in-progress');
+  });
+
+  it('타임아웃 뒤 키가 없거나 다시 읽지 못하면 처음 오류를 던진다', async () => {
+    const timeout = new Error('Command timed out');
+    redis.set.mockRejectedValue(timeout);
+    redis.get.mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('x'));
+
+    await expect(store.claim('e1')).rejects.toBe(timeout);
+    await expect(store.claim('e1')).rejects.toBe(timeout);
   });
 
   it('선점에 실패하면 완료 마커가 있으면 done, 아니면 in-progress', async () => {
