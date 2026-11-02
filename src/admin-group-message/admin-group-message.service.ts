@@ -211,6 +211,12 @@ export class AdminGroupMessageService {
           await this.store.save(job, token, 0);
           return false;
         }
+        // 묶음의 첫 발송 전에 RUNNING과 큐 위치를 한 번 저장한다. 그래야 묶음 처리 중 상태 조회가
+        // 이전 상태(QUEUED 등)를 보이지 않고, 묶음이 중간에 던져도 RUNNING이 남는다.
+        if (handled === 0 && job.status !== 'RUNNING') {
+          job.status = 'RUNNING';
+          await this.store.save(job, token, Date.now());
+        }
         const sending: GroupMessageTargetRecord = {
           ...pending,
           status: 'SENDING',

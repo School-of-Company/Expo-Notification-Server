@@ -327,6 +327,30 @@ describe('AdminGroupMessageService processing safety', () => {
     );
   });
 
+  it('QUEUED job은 첫 발송 전에 RUNNING과 큐 위치를 한 번 저장한다', async () => {
+    const record = { ...job([target('PENDING')]), status: 'QUEUED' as const };
+    const { service, send, save } = setup(record);
+    const statuses: string[] = [];
+    save.mockImplementation((saved: GroupMessageJob) => {
+      statuses.push(saved.status);
+      return Promise.resolve();
+    });
+
+    await service.process(record.jobId);
+
+    expect(statuses[0]).toBe('RUNNING');
+    expect(save).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      'lock',
+      expect.any(Number),
+    );
+    expect(save.mock.invocationCallOrder[0]).toBeLessThan(
+      send.mock.invocationCallOrder[0],
+    );
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
   it('묶음 크기를 넘는 대기 대상은 남겨 두고 true를 돌려준다', async () => {
     const record = job(
       Array.from({ length: 25 }, (_, n) => ({
