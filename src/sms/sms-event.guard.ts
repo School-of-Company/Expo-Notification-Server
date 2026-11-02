@@ -116,4 +116,20 @@ export class SmsEventGuard {
   async clearFailures(eventId: string): Promise<void> {
     await this.dedupe.clearFailureCount(eventId);
   }
+
+  async markDeadLettered(
+    topic: string,
+    partition: number,
+    offset: string,
+  ): Promise<void> {
+    await this.dedupe.markDeadLettered(topic, partition, offset);
+  }
+
+  async isDeadLettered(
+    topic: string,
+    partition: number,
+    offset: string,
+  ): Promise<boolean> {
+    return this.dedupe.isDeadLettered(topic, partition, offset);
+  }
 }
