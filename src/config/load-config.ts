@@ -71,6 +71,9 @@ function configFromEnv(env: Env): Record<string, unknown> {
       host: env.REDIS_HOST,
       port: env.REDIS_PORT,
       password: env.REDIS_PASSWORD,
+      connectTimeoutMs: env.REDIS_CONNECT_TIMEOUT_MS,
+      commandTimeoutMs: env.REDIS_COMMAND_TIMEOUT_MS,
+      maxRetriesPerRequest: env.REDIS_MAX_RETRIES_PER_REQUEST,
     }),
     sms: pickDefined({
       apiKey: env.SMS_API_KEY,

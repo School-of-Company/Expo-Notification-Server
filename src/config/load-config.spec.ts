@@ -31,7 +31,13 @@ describe('loadConfig', () => {
     expect(config.kafka.brokers).toEqual(['kafka-1:9092', 'kafka-2:9092']);
     expect(config.kafka.topics.smsRequested).toBe('notification.sms.requested');
     expect(config.kafka.topics.qrSmsSent).toBe('notification.qr-sms.sent');
-    expect(config.redis).toEqual({ host: 'redis', port: 6379 });
+    expect(config.redis).toEqual({
+      host: 'redis',
+      port: 6379,
+      connectTimeoutMs: 2000,
+      commandTimeoutMs: 2000,
+      maxRetriesPerRequest: 1,
+    });
     expect(config.sms.authCodeTtlSeconds).toBe(300);
     expect(config.port).toBe(3000);
     expect(config.discord.participantNumberUrl).toBeUndefined();

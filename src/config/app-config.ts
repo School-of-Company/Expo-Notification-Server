@@ -107,6 +107,10 @@ const baseAppConfigSchema = z.object({
     host: z.string().min(1),
     port: z.coerce.number().int().positive().default(6379),
     password: z.string().min(1).optional(),
+    // Redis 장애 때 요청·컨슈머가 무한정 매달리지 않도록 fail-fast로 묶는다(#130).
+    connectTimeoutMs: z.coerce.number().int().positive().default(2000),
+    commandTimeoutMs: z.coerce.number().int().positive().default(2000),
+    maxRetriesPerRequest: z.coerce.number().int().min(0).default(1),
   }),
   sms: z.object({
     apiKey: z.string().min(1),
