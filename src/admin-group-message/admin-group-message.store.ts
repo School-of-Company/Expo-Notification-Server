@@ -19,6 +19,7 @@ import {
 } from './admin-group-message-history.store';
 import {
   createGroupMessageJobLua,
+  GROUP_MESSAGE_LOCK_SECONDS,
   groupMessageDeltaKey as deltaKey,
   groupMessageJobId,
   groupMessageJobKey as jobKey,
@@ -163,7 +164,13 @@ export class AdminGroupMessageStore {
   async claim(id: string): Promise<string | null> {
     const token = randomUUID();
     try {
-      return (await this.redis.set(lockKey(id), token, 'EX', 30, 'NX')) === 'OK'
+      return (await this.redis.set(
+        lockKey(id),
+        token,
+        'EX',
+        GROUP_MESSAGE_LOCK_SECONDS,
+        'NX',
+      )) === 'OK'
         ? token
         : null;
     } catch {
@@ -186,6 +193,7 @@ export class AdminGroupMessageStore {
       token,
       target.targetId,
       JSON.stringify(target),
+      GROUP_MESSAGE_LOCK_SECONDS,
     );
     if (result !== 1) throw new GroupMessageRetryError();
   }
