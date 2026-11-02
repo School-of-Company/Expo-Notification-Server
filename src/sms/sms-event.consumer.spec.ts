@@ -40,7 +40,12 @@ describe('SmsEventConsumer', () => {
   let producer: { connect: jest.Mock; send: jest.Mock; disconnect: jest.Mock };
   let kafka: { consumer: jest.Mock; producer: jest.Mock };
   let service: { handle: jest.Mock };
-  let guard: { recordFailure: jest.Mock; clearFailures: jest.Mock };
+  let guard: {
+    recordFailure: jest.Mock;
+    clearFailures: jest.Mock;
+    isDeadLettered: jest.Mock;
+    markDeadLettered: jest.Mock;
+  };
   let eachMessage: EachMessageHandler;
   let consumer: SmsEventConsumer;
 
@@ -63,6 +68,8 @@ describe('SmsEventConsumer', () => {
     guard = {
       recordFailure: jest.fn().mockResolvedValue(1),
       clearFailures: jest.fn().mockResolvedValue(undefined),
+      isDeadLettered: jest.fn().mockResolvedValue(false),
+      markDeadLettered: jest.fn().mockResolvedValue(undefined),
     };
     consumer = new SmsEventConsumer(
       kafka as never,
@@ -242,9 +249,11 @@ describe('SmsEventConsumer 동시 처리 (consumerConcurrency>1)', () => {
     const client = {
       connect: jest.fn(),
       subscribe: jest.fn(),
-      run: jest.fn((o: { eachBatch: BatchHandler }) => {
-        eachBatch = o.eachBatch;
-      }),
+      run: jest.fn(
+        (o: { eachBatch: BatchHandler; eachBatchAutoResolve?: boolean }) => {
+          eachBatch = o.eachBatch;
+        },
+      ),
       disconnect: jest.fn(),
       commitOffsets: jest.fn(),
     };
@@ -261,6 +270,8 @@ describe('SmsEventConsumer 동시 처리 (consumerConcurrency>1)', () => {
     const guard = {
       recordFailure: jest.fn().mockResolvedValue(1),
       clearFailures: jest.fn().mockResolvedValue(undefined),
+      isDeadLettered: jest.fn().mockResolvedValue(false),
+      markDeadLettered: jest.fn().mockResolvedValue(undefined),
     };
     const base = createAppConfig();
     await new SmsEventConsumer(
@@ -270,15 +281,29 @@ describe('SmsEventConsumer 동시 처리 (consumerConcurrency>1)', () => {
       service as unknown as SmsEventService,
     ).onApplicationBootstrap();
     const resolveOffset = jest.fn<void, [string]>();
+    const heartbeat = jest.fn<Promise<void>, []>().mockResolvedValue(undefined);
+    let running = true;
     const run = (messages: unknown[]) =>
       eachBatch!({
         batch: { topic: 't', partition: 0, messages },
         resolveOffset,
-        heartbeat: jest.fn(),
-        isRunning: () => true,
+        heartbeat,
+        isRunning: () => running,
         isStale: () => false,
       } as never);
-    return { client, service, resolveOffset, run };
+    const stop = () => {
+      running = false;
+    };
+    return {
+      client,
+      producer,
+      service,
+      guard,
+      resolveOffset,
+      heartbeat,
+      stop,
+      run,
+    };
   };
   const msg = (offset: string, key: string | null, eventId: string) => ({
     offset,
@@ -331,5 +356,71 @@ describe('SmsEventConsumer 동시 처리 (consumerConcurrency>1)', () => {
     ).rejects.toBe(error);
 
     expect(resolveOffset.mock.calls.map((c: string[]) => c[0])).toEqual(['0']);
+  });
+
+  it('배치 자동 resolve를 끄고 eachBatch로 실행한다', async () => {
+    const { client } = await setup(2);
+
+    expect(client.run).toHaveBeenCalledWith(
+      expect.objectContaining({ eachBatchAutoResolve: false }),
+    );
+  });
+
+  it('처리 중 멈추면(종료·리밸런스) 앞쪽 처리된 오프셋까지만 resolve하고 정상 반환한다', async () => {
+    const { service, resolveOffset, stop, run } = await setup(2);
+    service.handle.mockImplementation((e: { eventId: string }) => {
+      if (e.eventId === 'a1') {
+        stop();
+      }
+      return Promise.resolve();
+    });
+
+    await run([
+      msg('0', 'a', 'a1'),
+      msg('1', 'a', 'a2'),
+      msg('2', 'a', 'a3'),
+      msg('3', 'a', 'a4'),
+    ]);
+
+    expect(service.handle).toHaveBeenCalledTimes(1);
+    expect(resolveOffset.mock.calls.map((c: string[]) => c[0])).toEqual(['0']);
+  });
+
+  it('heartbeat가 실패하면 모든 worker가 멈춘 뒤 연속 구간만 resolve하고 던진다', async () => {
+    const { service, heartbeat, resolveOffset, run } = await setup(2);
+    const error = new Error('REBALANCE_IN_PROGRESS');
+    heartbeat.mockRejectedValueOnce(error);
+
+    await expect(
+      run([msg('0', 'a', 'a1'), msg('1', 'a', 'a2'), msg('2', 'b', 'b1')]),
+    ).rejects.toBe(error);
+
+    // a1 뒤 heartbeat 실패로 a2는 시작하지 않는다(b1은 이미 진행 중이었을 수 있다)
+    expect(
+      service.handle.mock.calls.map((c: { eventId: string }[]) => c[0].eventId),
+    ).not.toContain('a2');
+    expect(resolveOffset.mock.calls.map((c: string[]) => c[0])).toEqual(['0']);
+  });
+
+  it('DLQ로 옮긴 오프셋을 기록하고, 그 오프셋이 재전달되면 처리하지 않고 건너뛴다', async () => {
+    const { service, producer, guard, resolveOffset, run } = await setup(2);
+    service.handle.mockRejectedValue(new SmsDeliveryUnknownError('unknown'));
+
+    await run([msg('0', 'a', 'a1')]);
+    expect(producer.send).toHaveBeenCalledTimes(1);
+    expect(guard.markDeadLettered).toHaveBeenCalledWith(
+      createAppConfig().kafka.topics.smsRequested,
+      0,
+      '0',
+    );
+
+    guard.isDeadLettered.mockResolvedValue(true);
+    await run([msg('0', 'a', 'a1')]);
+    expect(service.handle).toHaveBeenCalledTimes(1);
+    expect(producer.send).toHaveBeenCalledTimes(1);
+    expect(resolveOffset.mock.calls.map((c: string[]) => c[0])).toEqual([
+      '0',
+      '0',
+    ]);
   });
 });
