@@ -10,6 +10,8 @@ export const groupMessageJobKey = (id: string) =>
   `admin-group-message:{jobs}:job:${id}`;
 export const groupMessageLockKey = (id: string) =>
   `admin-group-message:{jobs}:lock:${id}`;
+// 처리 락 TTL. claim과 saveTarget의 락 연장이 같은 값을 쓴다.
+export const GROUP_MESSAGE_LOCK_SECONDS = 30;
 // 처리 중 대상별 진행 상태(targetId -> 대상 JSON). 본문 job 키에 합치기 전의 증분이다.
 export const groupMessageDeltaKey = (id: string) =>
   `admin-group-message:{jobs}:delta:${id}`;
@@ -52,7 +54,7 @@ local ttl = redis.call('PTTL', KEYS[1])
 if ttl < 0 then return 0 end
 redis.call('HSET', KEYS[3], ARGV[2], ARGV[3])
 redis.call('PEXPIRE', KEYS[3], ttl)
-redis.call('EXPIRE', KEYS[2], 30)
+redis.call('EXPIRE', KEYS[2], ARGV[4])
 return 1`;
 
 export const saveGroupMessageJobLua = `
