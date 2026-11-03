@@ -11,6 +11,8 @@ export const SMS_EVENT_DONE_MARKER = 'done-v2';
 const DONE_SECONDS = SMS_EVENT_DONE_TTL_SECONDS;
 const key = (eventId: string) => `sms:event:${eventId}`;
 const publishedKey = (eventId: string) => `sms:event-published:${eventId}`;
+const deadLetteredKey = (topic: string, partition: number, offset: string) =>
+  `sms:dlq-offset:${topic}:${partition}:${offset}`;
 
 export type ClaimResult =
   'claimed' | 'in-progress' | 'done' | 'legacy-done' | 'unknown';
@@ -116,6 +118,31 @@ export class SmsEventDedupeStore {
 
   async clearFailureCount(eventId: string): Promise<void> {
     await this.redis.del(`sms:event-fail:${eventId}`);
+  }
+
+  // DLQ로 옮긴 메시지를 오프셋으로 기록한다. 같은 오프셋의 재전달은 건너뛰고, 원 토픽으로 수동 재처리한 메시지는
+  // 새 오프셋이라 그대로 처리된다(eventId로 기록하면 재처리까지 막힌다).
+  async markDeadLettered(
+    topic: string,
+    partition: number,
+    offset: string,
+  ): Promise<void> {
+    await this.redis.set(
+      deadLetteredKey(topic, partition, offset),
+      '1',
+      'EX',
+      DONE_SECONDS,
+    );
+  }
+
+  async isDeadLettered(
+    topic: string,
+    partition: number,
+    offset: string,
+  ): Promise<boolean> {
+    return (
+      (await this.redis.exists(deadLetteredKey(topic, partition, offset))) === 1
+    );
   }
 
   async release(eventId: string): Promise<void> {

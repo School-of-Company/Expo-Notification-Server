@@ -3,7 +3,14 @@ import {
   OnModuleDestroy,
   OnApplicationBootstrap,
 } from '@nestjs/common';
-import { Consumer, Kafka, KafkaMessage, Partitioners, Producer } from 'kafkajs';
+import {
+  Consumer,
+  EachBatchPayload,
+  Kafka,
+  KafkaMessage,
+  Partitioners,
+  Producer,
+} from 'kafkajs';
 import { ZodType } from 'zod';
 import { parseKafkaJson } from '../common/kafka-json';
 import { AppConfig } from '../config/app-config';
@@ -44,22 +51,111 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
     await this.producer.connect();
     await this.consumer.connect();
     await this.consumer.subscribe({ topic: this.topic, fromBeginning: false });
+    // ponytail: 운영 Kafka는 파티션 1개라 partitionsConsumedConcurrently로는 동시성이 늘지 않는다.
+    //   동시성이 1(기본)이면 기존 eachMessage 순차 처리를 그대로 쓰고, 2 이상이면 파티션 안에서 eachBatch로 키가 다른 메시지를 병렬 처리한다.
+    if (this.config.sms.consumerConcurrency > 1) {
+      // 자동 resolve를 끈다. 켜 두면 멈춰서(isRunning/isStale) 정상 반환한 배치의 마지막 오프셋까지
+      // 커밋되어, 처리하지 않은 뒤쪽 메시지가 발송도 DLQ도 되지 않고 사라진다. resolve는 handleBatch가 한다.
+      await this.consumer.run({
+        eachBatchAutoResolve: false,
+        eachBatch: (payload) => this.handleBatch(payload),
+      });
+      return;
+    }
     await this.consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
-        const parsed = parseKafkaJson(message, this.schema);
-        if (!parsed.ok) {
-          this.logger.warn(
-            `잘못된 이벤트 무시(${this.topic}): ${parsed.reason}`,
-          );
+        const event = this.parse(message);
+        if (!event) {
           return;
         }
         // 첫 메시지 실패로 재시작해도 latest로 건너뛰지 않도록 현재 위치(다음 위치 아님)를 저장한다.
         await this.consumer.commitOffsets([
           { topic, partition, offset: message.offset },
         ]);
-        await this.process(parsed.value, message);
+        await this.process(event, message, partition);
       },
     });
+  }
+
+  private parse(message: KafkaMessage): T | undefined {
+    const parsed = parseKafkaJson(message, this.schema);
+    if (!parsed.ok) {
+      this.logger.warn(`잘못된 이벤트 무시(${this.topic}): ${parsed.reason}`);
+      return undefined;
+    }
+    return parsed.value;
+  }
+
+  /**
+   * 한 배치를 키별 직렬·키 간 병렬(최대 `sms.consumerConcurrency`)로 처리한다.
+   * - 같은 키(없으면 메시지별 독립)의 메시지는 오프셋 순서대로 처리해 순서를 지킨다.
+   * - 실패하면 새 작업 시작을 멈추고 진행 중인 것만 마무리한 뒤, 앞에서부터 연속으로 성공한 오프셋까지만 resolve하고 던진다.
+   *   뒤쪽에서 이미 성공한 메시지는 재전달되지만 dedupe(claim/complete)가 중복 발송을 막고,
+   *   DLQ로 옮긴 메시지는 오프셋 기록으로 건너뛴다.
+   * - 멈춤(종료·리밸런스)으로 끝까지 못 가도 같은 규칙으로 앞쪽 연속 구간만 resolve한다(자동 resolve는 꺼져 있다).
+   */
+  private async handleBatch(payload: EachBatchPayload): Promise<void> {
+    const { batch } = payload;
+    const { topic, partition, messages } = batch;
+    if (messages.length === 0) {
+      return;
+    }
+    // 배치 첫 메시지의 현재 위치만 저장한다(순서가 뒤섞인 커밋이 위치를 되돌리지 않도록 배치당 1회).
+    await this.consumer.commitOffsets([
+      { topic, partition, offset: messages[0].offset },
+    ]);
+
+    const groups = new Map<string, KafkaMessage[]>();
+    messages.forEach((message, index) => {
+      const key = message.key ? `k:${message.key.toString()}` : `i:${index}`;
+      const group = groups.get(key);
+      if (group) {
+        group.push(message);
+      } else {
+        groups.set(key, [message]);
+      }
+    });
+
+    const finished = new Set<string>();
+    let failure: { error: unknown } | undefined;
+    const queue = [...groups.values()];
+    const canContinue = () =>
+      !failure && payload.isRunning() && !payload.isStale();
+
+    const worker = async (): Promise<void> => {
+      for (let group = queue.shift(); group; group = queue.shift()) {
+        for (const message of group) {
+          if (!canContinue()) {
+            return;
+          }
+          try {
+            const event = this.parse(message);
+            if (event) {
+              await this.process(event, message, partition);
+            }
+            finished.add(message.offset);
+            // 리밸런스 중이면 reject된다. 실패로 보고 멈춰, 다른 worker도 새 메시지를 시작하지 않게 한다.
+            await payload.heartbeat();
+          } catch (error) {
+            failure ??= { error };
+            return;
+          }
+        }
+      }
+    };
+    const size = Math.min(this.config.sms.consumerConcurrency, queue.length);
+    // 모든 worker가 끝난 뒤에 resolve·throw한다. 한 worker가 먼저 던져도 다른 worker가 뒤에서 처리를 이어 가지 않게 한다.
+    await Promise.allSettled(Array.from({ length: size }, () => worker()));
+
+    for (const message of messages) {
+      if (!finished.has(message.offset)) {
+        break;
+      }
+      payload.resolveOffset(message.offset);
+    }
+    if (failure) {
+      throw failure.error;
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -67,12 +163,27 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
     await this.producer.disconnect();
   }
 
-  private async process(event: T, message: KafkaMessage): Promise<void> {
+  private async process(
+    event: T,
+    message: KafkaMessage,
+    partition: number,
+  ): Promise<void> {
+    // 이미 DLQ로 옮긴 오프셋의 재전달(앞쪽 실패로 배치가 다시 오는 경우 등)은 다시 DLQ에 넣거나 재시도하지 않는다.
+    if (
+      await this.guard.isDeadLettered(this.topic, partition, message.offset)
+    ) {
+      this.logger.log(
+        `DLQ로 옮긴 메시지의 재전달이라 건너뜀: topic=${this.topic}, eventId=${event.eventId}`,
+      );
+      return;
+    }
     try {
       await this.handle(event);
     } catch (error) {
       if (error instanceof SmsDeliveryUnknownError) {
-        await this.moveToDeadLetter(message, { 'x-sms-delivery': 'UNKNOWN' });
+        await this.moveToDeadLetter(message, partition, {
+          'x-sms-delivery': 'UNKNOWN',
+        });
         this.logger.error(
           `접수 결과 불명 이벤트를 DLQ에 보관(자동 재발송 안 함): topic=${this.topic}, eventId=${event.eventId}`,
         );
@@ -85,7 +196,7 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
       if (attempts < this.config.sms.eventMaxAttempts) {
         throw error;
       }
-      await this.moveToDeadLetter(message);
+      await this.moveToDeadLetter(message, partition);
       await this.guard
         .clearFailures(event.eventId)
         .catch((cleanupError: unknown) => {
@@ -105,6 +216,7 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
 
   private async moveToDeadLetter(
     message: KafkaMessage,
+    partition: number,
     headers: Record<string, string> = {},
   ): Promise<void> {
     await this.producer.send({
@@ -117,5 +229,15 @@ export abstract class SmsKafkaConsumer<T extends { eventId: string }>
         },
       ],
     });
+    // 기록이 실패해도 원본은 DLQ에 있다. 재전달되면 DLQ에 한 번 더 들어갈 뿐이라 처리를 막지 않는다.
+    await this.guard
+      .markDeadLettered(this.topic, partition, message.offset)
+      .catch((error: unknown) => {
+        this.logger.warn({
+          message: 'DLQ 오프셋 기록 실패',
+          topic: this.topic,
+          error: error instanceof Error ? error.message : undefined,
+        });
+      });
   }
 }

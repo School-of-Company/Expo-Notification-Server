@@ -47,6 +47,8 @@ const event = {
 const guard = {
   recordFailure: jest.fn().mockResolvedValue(1),
   clearFailures: jest.fn().mockResolvedValue(undefined),
+  isDeadLettered: jest.fn().mockResolvedValue(false),
+  markDeadLettered: jest.fn().mockResolvedValue(undefined),
 };
 
 describe('ParticipantRegisteredConsumer', () => {
