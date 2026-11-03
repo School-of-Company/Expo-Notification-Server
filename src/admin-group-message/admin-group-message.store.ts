@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import { mergeTargetDelta } from './admin-group-message-delta';
 import {
   GroupMessageRetryError,
   parseGroupMessageJob,
@@ -18,13 +19,17 @@ import {
 } from './admin-group-message-history.store';
 import {
   createGroupMessageJobLua,
+  GROUP_MESSAGE_LOCK_SECONDS,
+  groupMessageDeltaKey as deltaKey,
   groupMessageJobId,
   groupMessageJobKey as jobKey,
   groupMessageLockKey as lockKey,
   groupMessageQueueKey as queueKey,
   groupMessageRetryOperationKey as retryOperationKey,
+  readGroupMessageJobLua,
   remainingGroupMessageJobTtl,
   saveGroupMessageJobLua,
+  saveGroupMessageTargetLua,
   saveGroupMessageRetryLua,
 } from './admin-group-message-job.scripts';
 
@@ -139,9 +144,17 @@ export class AdminGroupMessageStore {
   }
 
   async getJob(id: string): Promise<GroupMessageJob | null> {
-    const raw = await this.redis.get(jobKey(id));
+    const result = await this.eval(
+      readGroupMessageJobLua,
+      2,
+      jobKey(id),
+      deltaKey(id),
+    );
+    const [raw, delta] = Array.isArray(result)
+      ? (result as [string | null, string[]])
+      : [null, []];
     if (!raw) return null;
-    return parseGroupMessageJob(raw);
+    return parseGroupMessageJob(mergeTargetDelta(raw, delta));
   }
 
   getJobForPreview(previewId: string): Promise<GroupMessageJob | null> {
@@ -151,12 +164,38 @@ export class AdminGroupMessageStore {
   async claim(id: string): Promise<string | null> {
     const token = randomUUID();
     try {
-      return (await this.redis.set(lockKey(id), token, 'EX', 30, 'NX')) === 'OK'
+      return (await this.redis.set(
+        lockKey(id),
+        token,
+        'EX',
+        GROUP_MESSAGE_LOCK_SECONDS,
+        'NX',
+      )) === 'OK'
         ? token
         : null;
     } catch {
       throw new GroupMessageRetryError();
     }
+  }
+
+  // 대상 1명분 상태만 쓴다. 본문은 다음 save에서 증분과 함께 합쳐진다.
+  async saveTarget(
+    jobId: string,
+    token: string,
+    target: GroupMessageJob['targets'][number],
+  ): Promise<void> {
+    const result = await this.eval(
+      saveGroupMessageTargetLua,
+      3,
+      jobKey(jobId),
+      lockKey(jobId),
+      deltaKey(jobId),
+      token,
+      target.targetId,
+      JSON.stringify(target),
+      GROUP_MESSAGE_LOCK_SECONDS,
+    );
+    if (result !== 1) throw new GroupMessageRetryError();
   }
 
   async save(
@@ -175,11 +214,12 @@ export class AdminGroupMessageStore {
     );
     const result = await this.eval(
       saveGroupMessageJobLua,
-      6,
+      7,
       jobKey(job.jobId),
       lockKey(job.jobId),
       queueKey,
       ...history.keys,
+      deltaKey(job.jobId),
       token,
       JSON.stringify(job),
       remainingGroupMessageJobTtl(job, settings.retentionSeconds),
@@ -205,12 +245,13 @@ export class AdminGroupMessageStore {
     );
     const result = await this.eval(
       saveGroupMessageRetryLua,
-      7,
+      8,
       jobKey(job.jobId),
       lockKey(job.jobId),
       queueKey,
       ...history.keys,
       retryOperationKey(job.jobId, operationId),
+      deltaKey(job.jobId),
       token,
       JSON.stringify(job),
       remainingGroupMessageJobTtl(job, settings.retentionSeconds),
