@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { kakaoOptionsFor } from './kakao-message';
 import { KakaoSenderProvider } from './kakao-sender.provider';
@@ -38,6 +39,7 @@ export class QrSmsService {
     private readonly kakao: KakaoSenderProvider,
     private readonly sentPublisher: QrSmsSentPublisher,
     private readonly expoNames: ExpoNameProvider,
+    private readonly features: ExpoFeaturePolicyProvider,
   ) {}
 
   async handle(event: ParticipantRegisteredEvent): Promise<void> {
@@ -45,7 +47,18 @@ export class QrSmsService {
     const template = standard
       ? this.config.sms.qrUrlTemplate
       : this.config.sms.traineeQrUrlTemplate;
+    let suppressed = false;
     const result = await this.guard.once(event.eventId, async (beginSend) => {
+      // 자동 알림 OFF면 조회·발송 없이 완료로 끝낸다(등록 자체는 User에서 끝났다). 조회 실패는 던져 선점을 풀고 재시도한다.
+      // 발행 표시를 완료 마커보다 먼저 남겨 재전달(already-done) 때도 qr-sms.sent를 내지 않는다. 표시 실패도 던진다.
+      if (!(await this.features.enabled(event.expoId, 'AUTO_NOTIFICATION'))) {
+        this.logger.log(
+          `자동 알림 OFF라 QR 문자를 보내지 않음: eventId=${event.eventId}, expoId=${event.expoId}`,
+        );
+        await this.dedupe.markPublished(event.eventId);
+        suppressed = true;
+        return;
+      }
       const links = buildQrPageLinks(template, event);
       const participantIds = links.map(({ id }) => id);
       // 이름과 신청 내역은 서로 기다리지 않고 함께 조회한다. 둘 다 부가 정보라 실패해도 발송은 계속한다.
@@ -127,6 +140,7 @@ export class QrSmsService {
       }
     });
 
+    if (suppressed) return;
     // 문자가 이미 나간 이벤트(이번에 실행했거나 이전에 끝냄)만 여기까지 온다. 문자는 다시 보내지 않고 발행만 시도한다.
     if (standard && result !== 'legacy-done') {
       await this.publishSent(event);

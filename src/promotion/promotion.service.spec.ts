@@ -1,3 +1,5 @@
+import { featurePolicyWith } from '../../test/fixtures/feature-policy.fixture';
+import { InternalCallError } from '../common/internal-http';
 import { Logger } from '@nestjs/common';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import {
@@ -59,6 +61,7 @@ describe('PromotionService 승급 안내(K3)', () => {
     Parameters<PromotionSolapiProvider['send']>
   >();
   const titleOf = jest.fn<Promise<string>, [string | undefined]>();
+  const featureState = jest.fn();
   let service: PromotionService;
   let save: jest.Mock<Promise<void>, [PromotionRecord, string]>;
 
@@ -66,6 +69,7 @@ describe('PromotionService 승급 안내(K3)', () => {
     config.kakao = undefined;
     send.mockReset().mockResolvedValue({ kind: 'unknown' });
     titleOf.mockReset().mockResolvedValue('광주 박람회');
+    featureState.mockReset().mockResolvedValue(true);
     const record: PromotionRecord = { event, status: 'PENDING', failures: 0 };
     const store = {
       claim: jest.fn().mockResolvedValue('token'),
@@ -84,6 +88,7 @@ describe('PromotionService 승급 안내(K3)', () => {
       { send } as unknown as PromotionSolapiProvider,
       { titleOf } as unknown as ExpoNameProvider,
       new KakaoSenderProvider(config),
+      featurePolicyWith(featureState),
     );
   });
 
@@ -98,6 +103,74 @@ describe('PromotionService 승급 안내(K3)', () => {
       from: config.sms.fromStandardNumber,
       text,
     });
+  });
+
+  it('AUTO_NOTIFICATION OFF면 승급 안내만 SKIPPED(FEATURE_DISABLED)로 끝내고 보내지 않는다', async () => {
+    featureState.mockResolvedValue(false);
+
+    await service.process(event.eventId);
+
+    expect(featureState).toHaveBeenCalledWith(
+      event.expoId,
+      'AUTO_NOTIFICATION',
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'SKIPPED',
+        reason: 'FEATURE_DISABLED',
+      }),
+      'token',
+    );
+  });
+
+  it('AUTO_NOTIFICATION OFF면 대표 번호 누락보다 먼저 SKIPPED로 끝낸다', async () => {
+    featureState.mockResolvedValue(false);
+    const service2 = new PromotionService(
+      config,
+      {
+        claim: jest.fn().mockResolvedValue('token'),
+        get: jest
+          .fn()
+          .mockResolvedValue({ event, status: 'PENDING', failures: 0 }),
+        save,
+        release: jest.fn().mockResolvedValue(undefined),
+      } as unknown as PromotionStore,
+      {
+        check: jest
+          .fn()
+          .mockResolvedValue({ ...check, representativePhoneNumber: null }),
+      } as unknown as PromotionApplicationProvider,
+      { send } as unknown as PromotionSolapiProvider,
+      { titleOf } as unknown as ExpoNameProvider,
+      new KakaoSenderProvider(config),
+      featurePolicyWith(featureState),
+    );
+
+    await service2.process(event.eventId);
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'SKIPPED',
+        reason: 'FEATURE_DISABLED',
+      }),
+      'token',
+    );
+  });
+
+  it('정책 조회 장애면 보내지 않고 PENDING으로 남겨 다시 확인한다', async () => {
+    featureState.mockRejectedValue(new InternalCallError('expo unreachable'));
+
+    await service.process(event.eventId);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PENDING',
+        reason: 'FEATURE_POLICY_UNAVAILABLE',
+      }),
+      'token',
+    );
   });
 
   const accepted = {
@@ -215,6 +288,7 @@ describe('PromotionService 복구 보류와 수동 재개(#32)', () => {
       { send } as unknown as PromotionSolapiProvider,
       { titleOf: jest.fn() } as unknown as ExpoNameProvider,
       new KakaoSenderProvider(config),
+      featurePolicyWith(jest.fn().mockResolvedValue(true)),
     );
     return { service, store, check, send };
   };

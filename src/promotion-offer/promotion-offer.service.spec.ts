@@ -1,3 +1,5 @@
+import { featurePolicyWith } from '../../test/fixtures/feature-policy.fixture';
+import { InternalCallError } from '../common/internal-http';
 import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
@@ -76,6 +78,7 @@ describe('promotion offer delivery', () => {
   let report: jest.Mock;
   let send: jest.Mock;
   let delivery: jest.Mock;
+  let featureState: jest.Mock;
   let service: PromotionOfferService;
 
   beforeEach(() => {
@@ -93,11 +96,13 @@ describe('promotion offer delivery', () => {
       });
     });
     delivery = jest.fn();
+    featureState = jest.fn().mockResolvedValue(true);
     service = new PromotionOfferService(
       createAppConfig(),
       store as unknown as PromotionOfferStore,
       { check, report } as unknown as PromotionOfferApplicationProvider,
       { send, delivery } as unknown as PromotionSolapiProvider,
+      featurePolicyWith(featureState),
     );
   });
   afterEach(() => jest.useRealTimers());
@@ -204,6 +209,43 @@ describe('promotion offer delivery', () => {
     );
     expect(error).toHaveBeenCalledTimes(1);
     error.mockRestore();
+  });
+
+  it('AUTO_NOTIFICATION OFF면 보내지 않고 FAILED(FEATURE_DISABLED)로 보고해 수락 없이 확정하지 않는다', async () => {
+    featureState.mockResolvedValue(false);
+    await service.handle(event);
+    expect(featureState).toHaveBeenCalledWith(
+      event.expoId,
+      'AUTO_NOTIFICATION',
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        reason: 'FEATURE_DISABLED',
+        report: 'FAILED',
+      }),
+    );
+    // 다시 켜도 같은 이벤트를 다시 보내지 않는다.
+    featureState.mockResolvedValue(true);
+    await service.process(event.eventId);
+    expect(send).not.toHaveBeenCalled();
+    expect(record().status).toBe('FAILED');
+  });
+
+  it('정책 조회 장애면 보내지 않고 보고 없이 PENDING으로 남겨 다시 확인한다', async () => {
+    featureState.mockRejectedValueOnce(
+      new InternalCallError('expo unreachable'),
+    );
+    await service.handle(event);
+    expect(send).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+    expect(record()).toMatchObject({
+      status: 'PENDING',
+      reason: 'FEATURE_POLICY_UNAVAILABLE',
+    });
+    await service.process(event.eventId);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('keeps a transient lookup failure pending without reporting', async () => {

@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { EachMessageHandler } from 'kafkajs';
 import * as request from 'supertest';
 import { App } from 'supertest/types';
+import { AdminGroupMessageStore } from '../src/admin-group-message/admin-group-message.store';
 import { AlarmReportService } from '../src/alarm/alarm-report.service';
 import { AppModule } from '../src/app.module';
 import { APP_CONFIG } from '../src/config/app-config.constants';
@@ -16,7 +17,16 @@ import {
 } from './fixtures/solapi-fetch.fixture';
 import { FakeRedis } from './fixtures/fake-redis';
 
+const BULK_EXPO_ID = '0192f0c8-0000-4000-8000-000000000001';
 const config = createAppConfig({
+  // enabled=false라 스케줄러는 돌지 않는다. 내부 라우트(토큰 검사·기능 검사)만 쓴다.
+  adminGroupMessaging: {
+    enabled: false,
+    internalToken: 'g'.repeat(32),
+    previewTtlSeconds: 1800,
+    authorizationTtlSeconds: 300,
+    retentionSeconds: 2592000,
+  },
   promotionOffer: {
     enabled: false,
     application: { baseUrl: 'http://app.test', internalToken: 'c'.repeat(32) },
@@ -27,6 +37,21 @@ const config = createAppConfig({
 });
 
 let confirmedUniqueParticipants = 30;
+// GET /internal/expo/{id}의 기능 실효 값. undefined면 Expo 장애(503)로 응답한다.
+let expoFeatures:
+  { AUTO_NOTIFICATION: boolean; BULK_MESSAGE: boolean } | undefined;
+const expoDetail = (): Response =>
+  expoFeatures
+    ? jsonResponse({
+        title: '광주 박람회',
+        features: Object.entries(expoFeatures).map(([key, enabled]) => ({
+          key,
+          configuredEnabled: enabled,
+          effectiveEnabled: enabled,
+        })),
+        featureRevision: 1,
+      })
+    : ({ ok: false, status: 503 } as Response);
 const jsonResponse = (body: unknown) =>
   ({ ok: true, status: 200, json: () => Promise.resolve(body) }) as Response;
 const internalResponse = (url: string): Response => {
@@ -37,6 +62,11 @@ const internalResponse = (url: string): Response => {
       content: [{ expoId: 'expo-1', title: '광주 박람회' }],
       hasNext: false,
     });
+  if (
+    url.endsWith('/internal/expo/expo-1') ||
+    url.endsWith(`/internal/expo/${BULK_EXPO_ID}`)
+  )
+    return expoDetail();
   if (url.endsWith('/internal/expo/expo-1/preregister-sessions'))
     return jsonResponse([{ id: 1, title: '10/31 오전' }]);
   if (url.endsWith('/internal/expos/expo-1/preregistrations/summary'))
@@ -84,6 +114,7 @@ describe('Notification server (e2e)', () => {
 
   beforeEach(async () => {
     config.sms = createAppConfig().sms;
+    expoFeatures = { AUTO_NOTIFICATION: true, BULK_MESSAGE: true };
     handlers.clear();
     solapiSend = jest.fn().mockResolvedValue({ failedMessageList: [] });
     fetchSpy = jest
@@ -121,6 +152,18 @@ describe('Notification server (e2e)', () => {
       .useValue(new FakeRedis())
       .overrideProvider(SOLAPI_CLIENT)
       .useValue({ send: solapiSend })
+      // 단체 발송 저장소는 Lua 스크립트를 써서 FakeRedis가 못 돌린다. 기능 검사 경로만 보도록 미리보기만 흉내 낸다.
+      .overrideProvider(AdminGroupMessageStore)
+      .useValue({
+        getJobForPreview: () => Promise.resolve(null),
+        getPreview: () =>
+          Promise.resolve({
+            requesterUserId: 1,
+            expoId: BULK_EXPO_ID,
+            targetFingerprint: 'b'.repeat(64),
+          }),
+        createJob: () => Promise.reject(new Error('createJob must not run')),
+      })
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -458,7 +501,10 @@ describe('Notification server (e2e)', () => {
     });
 
     it('User 이름 조회 404는 fallback 문자를 계속 발송한다', async () => {
-      fetchSpy.mockResolvedValueOnce({ ok: false, status: 404 });
+      // 첫 조회는 자동 알림 설정(Expo), 그다음이 User 이름 조회다.
+      fetchSpy
+        .mockResolvedValueOnce(expoDetail())
+        .mockResolvedValueOnce({ ok: false, status: 404 });
       await emit(registeredGroup, {
         ...registered,
         participants: [42, 43].map((id) => ({ id, code: 'a'.repeat(22) })),
@@ -468,7 +514,10 @@ describe('Notification server (e2e)', () => {
     });
 
     it('5명은 대표자 먼저 나머지 순서대로 한 문자에 담는다', async () => {
-      fetchSpy.mockResolvedValueOnce({ ok: false, status: 404 });
+      // 첫 조회는 자동 알림 설정(Expo), 그다음이 User 이름 조회다.
+      fetchSpy
+        .mockResolvedValueOnce(expoDetail())
+        .mockResolvedValueOnce({ ok: false, status: 404 });
       await emit(registeredGroup, {
         ...registered,
         participants: [45, 43, 42, 44, 46].map((id) => ({
@@ -613,6 +662,85 @@ describe('Notification server (e2e)', () => {
         [config.kafka.smsGroupId, registeredGroup].sort(),
       );
       expect(solapiSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('박람회 기능 설정 (AUTO_NOTIFICATION / BULK_MESSAGE)', () => {
+    const registered = {
+      eventId: 'reg-off',
+      expoId: 'expo-1',
+      participationType: 'STANDARD',
+      id: 42,
+      phoneNumber: '010-1234-5678',
+      participants: [{ id: 42, code: 'a'.repeat(22) }],
+    };
+    const registeredGroup = `${config.kafka.smsGroupId}.participant-registered`;
+    const jobRequest = () =>
+      request(app.getHttpServer())
+        .post(
+          '/internal/admin-group-messages/previews/0192f0c8-0000-4000-8000-0000000000aa/jobs',
+        )
+        .set('X-Internal-Token', 'g'.repeat(32))
+        .send({
+          requesterUserId: 1,
+          expoId: BULK_EXPO_ID,
+          targetFingerprint: 'b'.repeat(64),
+          idempotencyKey: '0192f0c8-0000-4000-8000-0000000000bb',
+        });
+
+    it('자동 알림 OFF면 QR 문자·발송 완료 이벤트가 없고, 인증번호(OTP)는 그대로 보낸다', async () => {
+      expoFeatures = { AUTO_NOTIFICATION: false, BULK_MESSAGE: false };
+
+      await emit(registeredGroup, registered);
+      expect(solapiSend).not.toHaveBeenCalled();
+      expect(
+        (producerSend.mock.calls as [{ topic: string }][]).filter(
+          ([message]) => message.topic === config.kafka.topics.qrSmsSent,
+        ),
+      ).toHaveLength(0);
+
+      await request(app.getHttpServer())
+        .post('/sms')
+        .send({ phoneNumber: '01012345678' })
+        .expect(200);
+      expect(solapiSend).toHaveBeenCalledTimes(1);
+    });
+
+    it('정책 조회 장애면 QR 문자를 보내지 않고 던져 재전달에 맡긴다', async () => {
+      expoFeatures = undefined;
+
+      await expect(emit(registeredGroup, registered)).rejects.toThrow();
+      expect(solapiSend).not.toHaveBeenCalled();
+    });
+
+    it('단체 발송 OFF면 내부 작업 실행이 기존 envelope에 code=FEATURE_DISABLED를 더한 409다', async () => {
+      expoFeatures = { AUTO_NOTIFICATION: true, BULK_MESSAGE: false };
+
+      const response = await jobRequest().expect(409);
+
+      expect(response.body).toEqual({
+        statusCode: 409,
+        message: 'BULK_MESSAGE feature is disabled',
+        error: 'Conflict',
+        code: 'FEATURE_DISABLED',
+      });
+    });
+
+    it('정책 조회 장애면 내부 작업 실행이 503이다(허용으로 보지 않는다)', async () => {
+      expoFeatures = undefined;
+
+      await jobRequest().expect(503);
+    });
+
+    it('내부 토큰이 없으면 기능 검사 전에 기존 403이다', async () => {
+      expoFeatures = { AUTO_NOTIFICATION: true, BULK_MESSAGE: false };
+
+      await request(app.getHttpServer())
+        .post(
+          '/internal/admin-group-messages/previews/0192f0c8-0000-4000-8000-0000000000aa/jobs',
+        )
+        .send({})
+        .expect(403);
     });
   });
 

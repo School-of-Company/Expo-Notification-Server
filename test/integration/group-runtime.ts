@@ -1,3 +1,4 @@
+import { ExpoFeaturePolicyProvider } from '../../src/common/expo-feature-policy.provider';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { Server } from 'node:http';
@@ -104,6 +105,12 @@ export class GroupMessageRuntime {
       .useValue(this.redis)
       .overrideProvider(GROUP_MESSAGE_SENDER)
       .useValue(this.sender)
+      // 기능 정책(Expo)은 이 시나리오 밖이다. 항상 ON으로 둔다.
+      .overrideProvider(ExpoFeaturePolicyProvider)
+      .useValue({
+        enabled: () => Promise.resolve(true),
+        enabledOrUnavailable: () => Promise.resolve(true),
+      })
       .compile();
     this.app = module.createNestApplication<INestApplication<Server>>();
     if (port === undefined) await this.app.init();

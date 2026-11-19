@@ -1,9 +1,11 @@
+import { featurePolicyWith } from '../../test/fixtures/feature-policy.fixture';
 import { randomUUID } from 'node:crypto';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import {
   mockKakaoFetch,
   sentKakaoMessages,
 } from '../../test/fixtures/kakao-fetch.fixture';
+import { InternalCallError } from '../common/internal-http';
 import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
 import type { GroupMessageJob } from './admin-group-message.schema';
 import type { CreateGroupMessagePreview } from './admin-group-message.schema';
@@ -76,10 +78,14 @@ describe('AdminGroupMessageService processing safety', () => {
     const store = {
       claim: jest.fn().mockResolvedValue('lock'),
       getJob: jest.fn().mockResolvedValue(record),
+      getJobForPreview: jest.fn().mockResolvedValue(undefined),
+      getPreview: jest.fn().mockResolvedValue(undefined),
+      createJob: jest.fn(),
       save,
       saveTarget,
       release: jest.fn().mockResolvedValue(undefined),
     };
+    const featureState = jest.fn().mockResolvedValue(true);
     const send = jest.fn().mockResolvedValue({
       kind: 'accepted',
       groupId: 'new-group',
@@ -114,11 +120,13 @@ describe('AdminGroupMessageService processing safety', () => {
       save,
       saveTarget,
       targetSnapshots,
+      featureState,
       service: new AdminGroupMessageService(
         config,
         store as unknown as AdminGroupMessageStore,
         sender,
         new KakaoSenderProvider(config),
+        featurePolicyWith(featureState),
       ),
     };
   }
@@ -389,7 +397,259 @@ describe('AdminGroupMessageService processing safety', () => {
     );
   });
 
+  describe('BULK_MESSAGE 기능 설정', () => {
+    const authorization = (expoId: string) => ({
+      requesterUserId: 1,
+      expoId,
+      targetFingerprint: 'b'.repeat(64),
+      idempotencyKey: randomUUID(),
+    });
+    const previewFor = (expoId: string) => ({
+      requesterUserId: 1,
+      expoId,
+      targetFingerprint: 'b'.repeat(64),
+    });
+
+    it('OFF면 첫 공급자 호출 전에 PAUSED(FEATURE_DISABLED)로 큐에서 뺀다', async () => {
+      const record = job([target('PENDING')]);
+      const { service, send, save, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+
+      await expect(service.process(record.jobId)).resolves.toBe(false);
+
+      expect(featureState).toHaveBeenCalledWith(record.expoId, 'BULK_MESSAGE');
+      expect(send).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'PAUSED',
+          reason: 'FEATURE_DISABLED',
+        }),
+        'lock',
+        0,
+      );
+      expect(record.targets[0].status).toBe('PENDING');
+    });
+
+    it('묶음마다 한 번 확인하고, 앞 묶음 발송 뒤 OFF면 다음 묶음은 보내지 않고 보낸 기록은 그대로 둔다', async () => {
+      const record = job(
+        Array.from({ length: 21 }, (_, index) => ({
+          ...target('PENDING'),
+          targetId: `target-${index}`,
+        })),
+      );
+      const { service, send, save, featureState } = setup(record);
+      featureState.mockResolvedValueOnce(true).mockResolvedValue(false);
+
+      await expect(service.process(record.jobId)).resolves.toBe(true);
+      await expect(service.process(record.jobId)).resolves.toBe(false);
+
+      expect(featureState).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenCalledTimes(20);
+      expect(
+        record.targets.filter((item) => item.status === 'ACCEPTED'),
+      ).toHaveLength(20);
+      expect(record.targets[20].status).toBe('PENDING');
+      expect(save).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: 'PAUSED',
+          reason: 'FEATURE_DISABLED',
+        }),
+        'lock',
+        0,
+      );
+    });
+
+    it('정책 조회 장애면 보내지 않고 OFF로 확정하지 않은 채 5초 뒤 다시 보도록 큐에 남긴다', async () => {
+      const record = job([target('PENDING')]);
+      const { service, send, save, featureState } = setup(record);
+      featureState.mockRejectedValue(
+        new InternalCallError('expo responded 503', 503),
+      );
+
+      await expect(service.process(record.jobId)).resolves.toBe(false);
+
+      expect(send).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'RUNNING',
+          reason: 'FEATURE_POLICY_UNAVAILABLE',
+        }),
+        'lock',
+        expect.any(Number),
+      );
+      const dueAt = (save.mock.calls as unknown[][])[0][2] as number;
+      expect(dueAt).toBeGreaterThan(Date.now() + 4000);
+    });
+
+    it('정책 조회 중 코드 오류는 장애로 삼키지 않고 던진다', async () => {
+      const record = job([target('PENDING')]);
+      const { service, send, featureState } = setup(record);
+      featureState.mockRejectedValue(new TypeError('bug'));
+
+      await expect(service.process(record.jobId)).rejects.toBeInstanceOf(
+        TypeError,
+      );
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('승인 만료가 조회 장애 재시도의 상한이다', async () => {
+      const record = {
+        ...job([target('PENDING')]),
+        authorizedUntil: new Date(Date.now() - 1).toISOString(),
+      };
+      const { service, send, save, featureState } = setup(record);
+
+      await service.process(record.jobId);
+
+      expect(featureState).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: 'AUTHORIZATION_EXPIRED' }),
+        'lock',
+        0,
+      );
+    });
+
+    it('OFF여도 이미 접수한 대상의 결과 수집은 계속한다', async () => {
+      const record = job([target('ACCEPTED')]);
+      const { service, delivery, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+
+      await service.process(record.jobId);
+
+      expect(featureState).not.toHaveBeenCalled();
+      expect(delivery).toHaveBeenCalledTimes(1);
+      expect(record.targets[0].status).toBe('DELIVERED');
+    });
+
+    it('OFF면 새 작업 생성을 409(FEATURE_DISABLED)로 막는다', async () => {
+      const record = job([target('PENDING')]);
+      const { service, store, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+      store.getPreview.mockResolvedValue(previewFor(record.expoId));
+
+      const error = await service
+        .execute(randomUUID(), authorization(record.expoId))
+        .catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({
+        status: 409,
+        response: { statusCode: 409, code: 'FEATURE_DISABLED' },
+      });
+      expect(store.createJob).not.toHaveBeenCalled();
+    });
+
+    it('OFF면 남은 대상이 있는 작업의 재개를 409로 막는다', async () => {
+      const record = {
+        ...job([target('PENDING')]),
+        status: 'PAUSED' as const,
+        reason: 'FEATURE_DISABLED',
+      };
+      const { service, store, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+      store.getJobForPreview.mockResolvedValue(record);
+
+      await expect(
+        service.execute(record.previewId, authorization(record.expoId)),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(store.claim).not.toHaveBeenCalled();
+    });
+
+    it('OFF여도 끝난 작업의 멱등 재호출은 작업 응답을 그대로 준다', async () => {
+      const record = job([target('ACCEPTED')]);
+      const { service, store, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+      store.getJobForPreview.mockResolvedValue(record);
+
+      await expect(
+        service.execute(record.previewId, authorization(record.expoId)),
+      ).resolves.toMatchObject({ jobId: record.jobId });
+      expect(featureState).not.toHaveBeenCalled();
+    });
+
+    it('OFF여도 실패가 없는 작업의 재시도 호출은 작업 응답을 그대로 준다', async () => {
+      const record = job([target('ACCEPTED')]);
+      const { service, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+
+      await expect(
+        service.retryFailures(record.jobId, authorization(record.expoId)),
+      ).resolves.toMatchObject({ jobId: record.jobId });
+      expect(featureState).not.toHaveBeenCalled();
+    });
+
+    it('정책 조회 장애면 작업 생성을 503, 없는 박람회면 404로 응답한다', async () => {
+      const record = job([target('PENDING')]);
+      const { service, store, featureState } = setup(record);
+      store.getPreview.mockResolvedValue(previewFor(record.expoId));
+      featureState.mockRejectedValueOnce(
+        new InternalCallError('expo unreachable'),
+      );
+      await expect(
+        service.execute(randomUUID(), authorization(record.expoId)),
+      ).rejects.toMatchObject({ status: 503 });
+      featureState.mockRejectedValueOnce(
+        new InternalCallError('expo returned no BULK_MESSAGE feature'),
+      );
+      await expect(
+        service.execute(randomUUID(), authorization(record.expoId)),
+      ).rejects.toMatchObject({ status: 503 });
+      featureState.mockRejectedValueOnce(
+        new InternalCallError('expo responded 404', 404),
+      );
+      await expect(
+        service.execute(randomUUID(), authorization(record.expoId)),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(store.createJob).not.toHaveBeenCalled();
+    });
+
+    it('ON이면 PAUSED 작업을 명시적 실행으로 재개한다', async () => {
+      const record = {
+        ...job([target('PENDING')]),
+        status: 'PAUSED' as const,
+        reason: 'FEATURE_DISABLED',
+      };
+      const { service, store, save } = setup(record);
+      store.getJobForPreview.mockResolvedValue(record);
+
+      await service.execute(record.previewId, authorization(record.expoId));
+
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'RUNNING', reason: undefined }),
+        'lock',
+        expect.any(Number),
+      );
+    });
+
+    it('OFF면 실패 재시도를 409로 막는다', async () => {
+      const record = job([target('FAILED')]);
+      const { service, store, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+
+      await expect(
+        service.retryFailures(record.jobId, authorization(record.expoId)),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(store.claim).not.toHaveBeenCalled();
+    });
+
+    it('OFF여도 작업 조회는 막지 않는다', async () => {
+      const record = job([target('PENDING')]);
+      const { service, featureState } = setup(record);
+      featureState.mockResolvedValue(false);
+
+      await expect(
+        service.getJob(record.jobId, {
+          requesterUserId: 1,
+          expoId: record.expoId,
+        }),
+      ).resolves.toMatchObject({ jobId: record.jobId });
+      expect(featureState).not.toHaveBeenCalled();
+    });
+  });
+
   it('accepts 900 Unicode Kakao characters and rejects 1001 after substitution', async () => {
+    // 미리보기는 준비용이라 BULK_MESSAGE를 조회하지 않는다(OFF여도 허용).
+    const featureState = jest.fn().mockResolvedValue(false);
     const createPreview = jest.fn();
     const store = { createPreview };
     const sender: GroupMessageSender = {
@@ -424,6 +684,7 @@ describe('AdminGroupMessageService processing safety', () => {
       store as unknown as AdminGroupMessageStore,
       sender,
       new KakaoSenderProvider(config),
+      featurePolicyWith(featureState),
     );
     const input = (content: string): CreateGroupMessagePreview => ({
       requesterUserId: 1,
@@ -457,5 +718,6 @@ describe('AdminGroupMessageService processing safety', () => {
     await expect(
       service.createPreview(input('가'.repeat(1001))),
     ).rejects.toThrow('Kakao message exceeds 1000 characters');
+    expect(featureState).not.toHaveBeenCalled();
   });
 });
