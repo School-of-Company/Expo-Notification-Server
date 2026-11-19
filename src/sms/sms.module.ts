@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { SolapiMessageService } from 'solapi';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { KakaoSenderProvider } from './kakao-sender.provider';
 import { ParticipantNamesProvider } from './participant-names.provider';
@@ -33,6 +34,7 @@ import { SmsController } from './sms.controller';
     SmsSenderProvider,
     KakaoSenderProvider,
     ExpoNameProvider,
+    ExpoFeaturePolicyProvider,
     SmsAuthStore,
     SmsEventDedupeStore,
     SmsAuthService,

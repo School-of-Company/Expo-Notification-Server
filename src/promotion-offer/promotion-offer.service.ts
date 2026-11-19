@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { PromotionSolapiProvider } from '../promotion/promotion-solapi.provider';
 import type { PromotionDelivery } from '../promotion/promotion-solapi.provider';
 import { PromotionOfferApplicationProvider } from './promotion-offer-application.provider';
@@ -28,6 +29,7 @@ export class PromotionOfferService {
     private readonly store: PromotionOfferStore,
     private readonly application: PromotionOfferApplicationProvider,
     private readonly sender: PromotionSolapiProvider,
+    private readonly features: ExpoFeaturePolicyProvider,
   ) {}
 
   async handle(event: PromotionOfferEvent): Promise<void> {
@@ -132,6 +134,35 @@ export class PromotionOfferService {
             status: 'SKIPPED',
             reason: 'OUTSIDE_SEND_WINDOW',
             report: 'SKIPPED',
+          },
+          token,
+        );
+        return;
+      }
+      // 자동 알림 OFF면 보내지 않고 FAILED(FEATURE_DISABLED)로 보고한다. Application은 이를 발송 실패로 보고
+      // 기한까지 내 신청 화면 응답을 열어 두며, 수락 없이 확정하지 않는다. 조회 실패면 보내지 않고 다시 확인한다.
+      const enabled = await this.features.enabledOrUnavailable(
+        check.expoId,
+        'AUTO_NOTIFICATION',
+      );
+      if (enabled === undefined) {
+        this.logger.warn({
+          message: '참여 제안 기능 정책 조회 실패, 재확인 대기',
+          eventId: id,
+        });
+        await this.store.save(
+          { ...record, reason: 'FEATURE_POLICY_UNAVAILABLE' },
+          token,
+        );
+        return;
+      }
+      if (!enabled) {
+        await this.finish(
+          {
+            ...record,
+            status: 'FAILED',
+            reason: 'FEATURE_DISABLED',
+            report: 'FAILED',
           },
           token,
         );

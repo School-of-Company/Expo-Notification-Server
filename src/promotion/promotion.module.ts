@@ -1,3 +1,4 @@
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { ExpoProjectionModule } from '../expo-projection/expo-projection.module';
 import { Module } from '@nestjs/common';
 import { ExpoNameProvider } from '../common/expo-name.provider';
@@ -22,6 +23,7 @@ import {
     KakaoSenderProvider,
     // ponytail: SmsModule과 인스턴스가 따로라 캐시도 따로다. 조회가 두 배일 뿐이라 공유 모듈은 만들지 않았다.
     ExpoNameProvider,
+    ExpoFeaturePolicyProvider,
     PromotionStore,
     PromotionService,
     PromotionConsumer,

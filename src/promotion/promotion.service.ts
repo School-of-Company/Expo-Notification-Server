@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { kakaoOptionsFor } from '../sms/kakao-message';
 import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
@@ -30,6 +31,7 @@ export class PromotionService {
     private readonly sender: PromotionSolapiProvider,
     private readonly expoNames: ExpoNameProvider,
     private readonly kakao: KakaoSenderProvider,
+    private readonly features: ExpoFeaturePolicyProvider,
   ) {}
 
   async handle(event: PromotionEvent): Promise<void> {
@@ -149,6 +151,29 @@ export class PromotionService {
       if (!check.eligible) {
         await this.store.save(
           { ...record, status: 'SKIPPED', reason: check.reason },
+          token,
+        );
+        return;
+      }
+      // 승급(상태 전이)은 Application에서 이미 끝났다. 자동 알림 OFF면 안내만 생략하고, 조회 실패면 보내지 않고 다시 확인한다.
+      const enabled = await this.features.enabledOrUnavailable(
+        check.expoId,
+        'AUTO_NOTIFICATION',
+      );
+      if (enabled === undefined) {
+        this.logger.warn({
+          message: '승급 안내 기능 정책 조회 실패, 재확인 대기',
+          eventId: id,
+        });
+        await this.store.save(
+          { ...record, reason: 'FEATURE_POLICY_UNAVAILABLE' },
+          token,
+        );
+        return;
+      }
+      if (!enabled) {
+        await this.store.save(
+          { ...record, status: 'SKIPPED', reason: 'FEATURE_DISABLED' },
           token,
         );
         return;

@@ -1,3 +1,4 @@
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { Module } from '@nestjs/common';
 import { PromotionSolapiProvider } from '../promotion/promotion-solapi.provider';
 import { PromotionOfferApplicationProvider } from './promotion-offer-application.provider';
@@ -15,6 +16,7 @@ import {
   providers: [
     PromotionOfferApplicationProvider,
     PromotionSolapiProvider,
+    ExpoFeaturePolicyProvider,
     PromotionOfferStore,
     PromotionOfferService,
     PromotionOfferConsumer,

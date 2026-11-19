@@ -1,3 +1,4 @@
+import { ExpoFeaturePolicyProvider } from '../../src/common/expo-feature-policy.provider';
 import Redis from 'ioredis';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -45,6 +46,12 @@ async function main(): Promise<void> {
     .useValue(redis)
     .overrideProvider(GROUP_MESSAGE_SENDER)
     .useValue(new FakeGroupMessageSender())
+    // 로컬 harness는 Expo 없이 돈다. BULK_MESSAGE를 항상 ON으로 둔다.
+    .overrideProvider(ExpoFeaturePolicyProvider)
+    .useValue({
+      enabled: () => Promise.resolve(true),
+      enabledOrUnavailable: () => Promise.resolve(true),
+    })
     .compile();
   const app = module.createNestApplication<INestApplication<Server>>();
   await app.listen(port, '127.0.0.1');

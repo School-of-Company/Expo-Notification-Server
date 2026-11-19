@@ -1,3 +1,4 @@
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { Module } from '@nestjs/common';
 import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
 import {
@@ -31,6 +32,7 @@ import { AdminGroupMessageHistoryStore } from './admin-group-message-history.sto
     AdminGroupMessageHistoryInternalGuard,
     GroupMessageSolapiProvider,
     KakaoSenderProvider,
+    ExpoFeaturePolicyProvider,
     { provide: GROUP_MESSAGE_SENDER, useExisting: GroupMessageSolapiProvider },
   ],
 })

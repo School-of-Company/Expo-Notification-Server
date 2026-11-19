@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfig } from '../config/app-config';
 import { APP_CONFIG } from '../config/app-config.constants';
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { ExpoNameProvider } from '../common/expo-name.provider';
 import { maskPhone } from '../common/mask-phone';
 import {
@@ -27,6 +28,7 @@ export class SmsEventService {
     private readonly sender: SmsSenderProvider,
     private readonly kakao: KakaoSenderProvider,
     private readonly expoNames: ExpoNameProvider,
+    private readonly features: ExpoFeaturePolicyProvider,
   ) {}
 
   async handle(event: SmsEvent): Promise<void> {
@@ -66,6 +68,7 @@ export class SmsEventService {
 
       const messages = to.map((recipient) => ({ to: recipient, from, text }));
 
+      if (!(await this.autoNotificationOn(event))) return;
       await beginSend();
       const receipt = await this.sender.deliver(event.eventId, messages);
 
@@ -92,6 +95,25 @@ export class SmsEventService {
         );
       }
     });
+  }
+
+  // 발송 직전 AUTO_NOTIFICATION 확인. OFF면 보내지 않고 완료로 끝내 재활성화돼도 소급 발송하지 않는다.
+  // 조회 실패는 던져서(선점 해제) 기존 유한 재시도·DLQ를 따른다. CUSTOM은 expoId가 없고 Expo가 직접 만든
+  // 연수 outbox 안내라 대상이 아니다. expoId 없는 구형 DRAW_RESULT는 박람회를 추정하지 않고 경고만 남기고 보낸다.
+  private async autoNotificationOn(event: SmsEvent): Promise<boolean> {
+    if (event.type === 'CUSTOM') return true;
+    if (!event.expoId) {
+      this.logger.warn(
+        `박람회 식별 불가로 자동 알림 설정 확인 없이 발송: eventId=${event.eventId}, type=${event.type}`,
+      );
+      return true;
+    }
+    if (await this.features.enabled(event.expoId, 'AUTO_NOTIFICATION'))
+      return true;
+    this.logger.log(
+      `자동 알림 OFF라 발송하지 않음: eventId=${event.eventId}, type=${event.type}, expoId=${event.expoId}`,
+    );
+    return false;
   }
 
   // Application 신청 결과(#110)만 대상이다. 허용 박람회가 아니거나 오래된 이벤트는 보내지 않고 끝낸다.

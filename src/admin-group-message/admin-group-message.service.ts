@@ -3,12 +3,16 @@ import {
   GoneException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { APP_CONFIG } from '../config/app-config.constants';
 import type { AppConfig } from '../config/app-config';
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
+import { InternalCallError } from '../common/internal-http';
 import { maskPhone } from '../common/mask-phone';
 import { renderTemplate } from '../sms/kakao-message';
 import { KakaoSenderProvider } from '../sms/kakao-sender.provider';
@@ -32,11 +36,14 @@ const PROCESS_BATCH_SIZE = 20;
 
 @Injectable()
 export class AdminGroupMessageService {
+  private readonly logger = new Logger(AdminGroupMessageService.name);
+
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly store: AdminGroupMessageStore,
     @Inject(GROUP_MESSAGE_SENDER) private readonly sender: GroupMessageSender,
     private readonly kakao: KakaoSenderProvider,
+    private readonly features: ExpoFeaturePolicyProvider,
   ) {}
 
   configResponse() {
@@ -85,6 +92,9 @@ export class AdminGroupMessageService {
       this.assertJobBinding(existing, authorization);
       if (existing.targetFingerprint !== authorization.targetFingerprint)
         throw new ConflictException('target fingerprint changed');
+      // 남은 대상을 다시 보내는 재개만 막는다. 끝난 작업의 멱등 재호출은 작업 응답을 그대로 준다.
+      if (existing.targets.some((target) => target.status === 'PENDING'))
+        await this.assertBulkMessageOn(authorization.expoId);
       await this.refreshPendingAuthorization(existing.jobId);
       return this.jobResponse(
         (await this.store.getJob(existing.jobId)) ?? existing,
@@ -92,6 +102,7 @@ export class AdminGroupMessageService {
     }
     const preview = await this.preview(previewId);
     this.assertBinding(preview, authorization);
+    await this.assertBulkMessageOn(authorization.expoId);
     const job = await this.store.createJob(preview);
     await this.refreshPendingAuthorization(job.jobId);
     return this.jobResponse((await this.store.getJob(job.jobId)) ?? job);
@@ -115,6 +126,7 @@ export class AdminGroupMessageService {
       throw new ConflictException('target fingerprint changed');
     if (!job.targets.some((target) => target.status === 'FAILED'))
       return this.jobResponse(job);
+    await this.assertBulkMessageOn(authorization.expoId);
     const token = await this.store.claim(jobId);
     if (!token) return this.jobResponse(job);
     try {
@@ -211,6 +223,33 @@ export class AdminGroupMessageService {
           await this.store.save(job, token, 0);
           return false;
         }
+        // 묶음(PROCESS_BATCH_SIZE명)마다 첫 공급자 호출 직전에 BULK_MESSAGE를 한 번 확인한다. OFF면 남은 PENDING을
+        // 그대로 두고 PAUSED(FEATURE_DISABLED)로 큐에서 뺀다. 다시 켜기만 해서는 재개하지 않고 명시적 실행(execute)이 필요하다.
+        // 조회 실패면 보내지 않고 5초 뒤 다시 본다. 승인 만료(authorizedUntil)가 재시도 상한이다.
+        // ponytail: 묶음 안에서는 OFF가 늦게 반영된다(최대 PROCESS_BATCH_SIZE-1명). 더 빨라야 하면 묶음을 줄인다.
+        if (handled === 0) {
+          const enabled = await this.features.enabledOrUnavailable(
+            job.expoId,
+            'BULK_MESSAGE',
+          );
+          if (enabled === false) {
+            job.status = 'PAUSED';
+            job.reason = 'FEATURE_DISABLED';
+            await this.store.save(job, token, 0);
+            return false;
+          }
+          if (enabled === undefined) {
+            this.logger.warn(
+              `단체 발송 기능 정책 조회 실패, 5초 뒤 재확인: jobId=${jobId}`,
+            );
+            job.status = this.jobStatus(job);
+            job.reason = 'FEATURE_POLICY_UNAVAILABLE';
+            await this.store.save(job, token, Date.now() + 5000);
+            return false;
+          }
+          if (job.reason === 'FEATURE_POLICY_UNAVAILABLE')
+            job.reason = undefined;
+        }
         // 묶음의 첫 발송 전에 RUNNING과 큐 위치를 한 번 저장한다. 그래야 묶음 처리 중 상태 조회가
         // 이전 상태(QUEUED 등)를 보이지 않고, 묶음이 중간에 던져도 RUNNING이 남는다.
         if (handled === 0 && job.status !== 'RUNNING') {
@@ -264,6 +303,27 @@ export class AdminGroupMessageService {
     } finally {
       await this.store.release(jobId, token);
     }
+  }
+
+  // 새 발송(작업 생성·PENDING 재개·실패 재시도)만 막는다. 미리보기·설정·작업 조회·결과 수집은 OFF여도 허용한다.
+  private async assertBulkMessageOn(expoId: string): Promise<void> {
+    let enabled: boolean;
+    try {
+      enabled = await this.features.enabled(expoId, 'BULK_MESSAGE');
+    } catch (error) {
+      if (!(error instanceof InternalCallError)) throw error;
+      if (error.status === 404) throw new NotFoundException();
+      throw new ServiceUnavailableException(
+        'expo feature policy is unavailable',
+      );
+    }
+    if (!enabled)
+      throw new ConflictException({
+        statusCode: 409,
+        message: 'BULK_MESSAGE feature is disabled',
+        error: 'Conflict',
+        code: 'FEATURE_DISABLED',
+      });
   }
 
   private nextPending(job: GroupMessageJob, from: number): number {

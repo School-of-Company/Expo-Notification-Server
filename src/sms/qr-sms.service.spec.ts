@@ -1,5 +1,8 @@
+import { featurePolicyWith } from '../../test/fixtures/feature-policy.fixture';
 import { Test } from '@nestjs/testing';
+import { ExpoFeaturePolicyProvider } from '../common/expo-feature-policy.provider';
 import { ExpoNameProvider } from '../common/expo-name.provider';
+import { InternalCallError } from '../common/internal-http';
 import { APP_CONFIG } from '../config/app-config.constants';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
@@ -54,6 +57,7 @@ describe('QrSmsService', () => {
   >();
   const publish = jest.fn<Promise<void>, [unknown]>();
   const titleOf = jest.fn<Promise<string>, [string | undefined]>();
+  const featureState = jest.fn();
   // 이름 조회 응답만 흉내 낸다. Solapi 호출은 아래 globalFetch가 send 가짜로 돌린다 (실제 접속 없음).
   const fetchSpy = jest.fn<Promise<Response>, Parameters<typeof fetch>>();
   const globalFetch = jest
@@ -70,6 +74,7 @@ describe('QrSmsService', () => {
     send.mockReset().mockResolvedValue({ failedMessageList: [] });
     publish.mockReset().mockResolvedValue(undefined);
     titleOf.mockReset().mockResolvedValue('광주 박람회');
+    featureState.mockReset().mockResolvedValue(true);
     config.kakao = undefined;
     fetchSpy
       .mockReset()
@@ -83,6 +88,10 @@ describe('QrSmsService', () => {
         { provide: SOLAPI_CLIENT, useValue: { send } },
         { provide: QrSmsSentPublisher, useValue: { publish } },
         { provide: ExpoNameProvider, useValue: { titleOf } },
+        {
+          provide: ExpoFeaturePolicyProvider,
+          useValue: featurePolicyWith(featureState),
+        },
         SmsEventDedupeStore,
         SmsEventGuard,
         ParticipantNamesProvider,
@@ -375,6 +384,47 @@ describe('QrSmsService', () => {
       expect(await redis.get('sms:event:e1')).toBeNull();
     },
   );
+
+  describe('AUTO_NOTIFICATION 기능 설정', () => {
+    it('OFF면 문자도 qr-sms.sent도 보내지 않고, 재전달돼도 발행하지 않는다', async () => {
+      featureState.mockResolvedValue(false);
+
+      await service.handle(standard);
+      await service.handle(standard);
+
+      expect(featureState).toHaveBeenCalledWith('expo-1', 'AUTO_NOTIFICATION');
+      expect(send).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      // OFF면 이름·신청내역도 조회하지 않는다.
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await redis.get('sms:event:e1')).toBe('done-v2');
+    });
+
+    it('OFF인데 발행 표시가 실패하면 완료로 남기지 않고 던져 재전달에 맡긴다', async () => {
+      featureState.mockResolvedValue(false);
+      jest
+        .spyOn(store, 'markPublished')
+        .mockRejectedValueOnce(new Error('redis down'));
+
+      await expect(service.handle(standard)).rejects.toThrow('redis down');
+
+      expect(send).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(await redis.get('sms:event:e1')).toBeNull();
+    });
+
+    it('정책 조회 장애면 보내지 않고 선점을 풀어 재전달에 맡긴다', async () => {
+      featureState.mockRejectedValue(new InternalCallError('expo unreachable'));
+
+      await expect(service.handle(standard)).rejects.toBeInstanceOf(
+        InternalCallError,
+      );
+
+      expect(send).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(await redis.get('sms:event:e1')).toBeNull();
+    });
+  });
 
   it('잘못된 템플릿은 발송/발행 없이 실패하고 선점을 해제한다', async () => {
     config.sms.qrUrlTemplate =

@@ -160,6 +160,33 @@ processing(선점 5분) 이벤트는 건너뛰거나 DLQ로 보내지 않고 기
 
 배포 제약: 구버전 인스턴스는 `sending`/`unknown` 값을 처리 중으로 보고 재전달 대기를 반복한다(발송하지 않음). 혼합 버전 구간에서는 해당 파티션이 대기할 수 있으므로 같은 consumer group의 구버전을 모두 교체한다. 롤백할 때도 남아 있는 `sending`/`unknown` 키는 같은 이유로 해당 파티션을 막는다. 이 경우 위 복구 절차로 키를 먼저 정리한다. 발송 전 단계(이름 조회 등)는 선점 5분 안에 끝나야 한다. 이 시간을 넘기면 다른 인스턴스가 같은 이벤트를 선점할 수 있다(소유자 토큰은 두지 않았다).
 
+## 박람회 기능 설정 적용 (Expo #264 F08, Notification #150)
+
+Expo가 원본이다. 발송 직전마다 `GET /internal/expo/{expoId}`(`expo.baseUrl`, `X-Internal-Token`)의 `features[].effectiveEnabled`를 읽는다. 계약은 Expo `docs/expo-feature-settings.md`의 "내부 정책 조회 계약"이다. 캐시나 `expo.expo.changed` 프로젝션은 쓰지 않는다. `features` 없음·키 없음·boolean 아님·JSON 오류·401/403/5xx·타임아웃·형식이 틀린 `expoId`는 모두 "조회 장애"로 보며 ON이나 OFF로 대체하지 않는다. `expo` 설정이 없어도 부팅은 되지만(설정상 선택이다) 부팅 때 WARN 로그를 남기고, 자동 알림·단체 발송은 모두 조회 장애로 처리된다. 기능 설정을 쓰려면 `expo`를 설정해야 한다.
+
+| 발송 유형               | 진입점                                  | 기능                                   | OFF                                                              | 조회 장애                                                             |
+| ----------------------- | --------------------------------------- | -------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 본인 인증 OTP           | `POST /sms`                             | 대상 아님                              | -                                                                | -                                                                     |
+| 등록 QR 문자            | `user.participant.registered`           | `AUTO_NOTIFICATION`                    | 보내지 않고 완료(`done-v2`)한다. `qr-sms.sent`는 발행하지 않는다 | 선점을 풀고 던진다. `sms.eventMaxAttempts`번 뒤 DLQ                   |
+| 신청 결과 문자(#110)    | `notification.sms.requested`            | `AUTO_NOTIFICATION`                    | 위와 같음                                                        | 위와 같음                                                             |
+| 당첨 문자 `DRAW_RESULT` | `notification.sms.requested`            | `AUTO_NOTIFICATION` (`expoId` 있을 때) | 위와 같음                                                        | 위와 같음                                                             |
+| 연수 안내 `CUSTOM`      | `notification.sms.requested`            | 대상 아님(아래)                        | -                                                                | -                                                                     |
+| 승급 완료 안내(#20)     | `application.program-session.promoted`  | `AUTO_NOTIFICATION`                    | `SKIPPED`(`FEATURE_DISABLED`)로 끝낸다                           | `PENDING`(`FEATURE_POLICY_UNAVAILABLE`)으로 두고 경고 로그를 남긴 뒤 5초 뒤 다시 확인한다(상한 없음, 기존 `LOOKUP_UNAVAILABLE`과 같다) |
+| 대기 참여 제안(#52)     | `application.promotion-offer.requested` | `AUTO_NOTIFICATION`                    | `FAILED`(`FEATURE_DISABLED`)로 Application에 보고한다            | 승급 안내와 같다. 보고하지 않는다                                     |
+| 관리자 단체 발송        | `/internal/admin-group-messages/**`     | `BULK_MESSAGE`                         | 아래                                                             | 아래                                                                  |
+| 등록 인원 알람(Discord) | 스케줄러                                | 대상 아님(내부 운영)                   | -                                                                | -                                                                     |
+
+- 문자·알림톡은 같은 검사를 쓴다. 알림톡은 문자가 접수된 뒤에만 나가므로 따로 검사하지 않는다. 채널·템플릿·`adminGroupMessaging.enabled` 같은 전역 설정은 지금처럼 따로 본다.
+- OFF로 끝낸 이벤트는 완료 마커가 남는다. 그래서 다시 켜도 지난 안내를 소급해서 보내지 않는다. 이미 접수·발송한 건과 결과 조회(승급 `ACCEPTED`의 전달 확인, 단체 발송의 결과 수집)는 OFF여도 계속한다.
+- 승급·취소 같은 상태 전이는 Application에서 이미 끝난 뒤에 이벤트가 온다. 알림을 생략해도 상태와 outbox는 그대로다. 참여 제안을 `FAILED`로 보고하면 Application은 `DELIVERY_FAILED`로 기록한다. 응답 기한(보고 시각 + 6시간, 마감 이내) 동안은 내 신청 화면에서 수락할 수 있고, 기한이 지나면 다음 대기자에게 넘어간다. 수락 없이 확정하지 않는다.
+- **박람회 식별:** `DRAW_RESULT`는 Form이 `expoId`를 함께 보낸다(Form `survey-draw-result-relay.service.ts`). `expoId`가 없는 구형 이벤트는 박람회를 추정하지 않는다. 확인 없이 지금처럼 보내고 `박람회 식별 불가로 자동 알림 설정 확인 없이 발송` 경고 로그를 남긴다. `CUSTOM`에는 `expoId`가 없다. Expo 연수 outbox가 Expo 안에서 직접 만드는 안내라 Expo 행동 표상 "연수 SMS outbox 발송 계속"에 해당하므로 Notification이 검사하지 않는다. 검사가 필요하면 producer(Expo)가 발행 전에 확인한다.
+
+단체 발송(`BULK_MESSAGE`):
+
+- 새 작업 생성, 남은(`PENDING`) 대상이 있는 작업의 재개(`POST .../previews/{previewId}/jobs`), 실패 대상이 있는 재시도(`POST .../jobs/{jobId}/retries`)는 OFF면 409다. 보낼 대상이 없는 작업의 같은 요청 재호출은 OFF여도 작업 응답을 그대로 준다. 기존 Nest 오류 envelope에 `code`를 더한다: `{"statusCode":409,"message":"BULK_MESSAGE feature is disabled","error":"Conflict","code":"FEATURE_DISABLED"}`. 조회 장애는 503, Expo 404는 404다. 내부 토큰 검사(403)가 먼저다.
+- `GET .../config`, 미리보기 `POST .../previews`, `GET .../jobs/{jobId}`, 내역 조회는 OFF여도 허용한다.
+- 스케줄러는 발송 묶음(한 번 선점에 최대 20명, 코드 상수 `PROCESS_BATCH_SIZE`)마다 첫 공급자 호출 직전에 한 번 다시 확인한다. 묶음 안에서는 OFF가 다음 묶음부터 반영된다. OFF면 남은 `PENDING` 대상은 그대로 두고 작업을 `PAUSED`(`reason: FEATURE_DISABLED`)로 큐에서 뺀다. 이미 보낸 대상은 바꾸지 않는다. 다시 켜기만 해서는 재개하지 않는다. 같은 미리보기로 작업 실행 API를 다시 호출해야(명시적 재개) 남은 대상을 보낸다. 조회 장애면 보내지 않고 `reason: FEATURE_POLICY_UNAVAILABLE`로 남겨 5초 뒤 다시 확인한다. 승인 만료(`authorizationTtlSeconds`)가 재시도 상한이며, 만료되면 기존처럼 `PAUSED`(`AUTHORIZATION_EXPIRED`)다.
+
 ## 박람회 등록 인원 리포트 (내부 API 조회, #54)
 
 `expo.applicant-count.updated` 이벤트는 발행하는 서비스가 없어 리포트가 나가지 않았다. 그래서 이벤트를 받지 않고 크론이 직접 조회하도록 바꿨다. 컨슈머와 `kafka.alarmGroupId`·`kafka.topics.expoApplicantCount` 설정은 제거했다. config-server에 남은 두 키는 무시된다.

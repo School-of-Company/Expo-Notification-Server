@@ -1,3 +1,4 @@
+import { ExpoFeaturePolicyProvider } from '../../src/common/expo-feature-policy.provider';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { logLevel, Partitioners } from 'kafkajs';
@@ -337,6 +338,14 @@ export class CustomRuntime {
           provide: ExpoNameProvider,
           useValue: {
             titleOf: () => Promise.resolve(this.config.sms.expoName),
+          },
+        },
+        // 기능 정책(Expo)은 이 시나리오 밖이다. 항상 ON으로 둔다.
+        {
+          provide: ExpoFeaturePolicyProvider,
+          useValue: {
+            enabled: () => Promise.resolve(true),
+            enabledOrUnavailable: () => Promise.resolve(true),
           },
         },
       ],

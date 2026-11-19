@@ -68,3 +68,42 @@ export async function fetchPreregisterSessionTitles(
   }
   return new Map(parsed.data.map((session) => [session.id, session.title]));
 }
+
+export type ExpoFeatureKey = 'AUTO_NOTIFICATION' | 'BULK_MESSAGE';
+
+const expoFeatures = z.object({
+  features: z.array(
+    z.object({ key: z.string(), effectiveEnabled: z.unknown() }),
+  ),
+});
+
+/**
+ * 박람회 기능의 실효 값 (`GET /internal/expo/{id}`의 `features`, Expo docs/expo-feature-settings.md).
+ * `features`가 없거나(구형 Expo) 키가 없거나 boolean이 아니면 허용으로 보지 않고 InternalCallError를 던진다.
+ */
+export async function fetchExpoFeatureEnabled(
+  connection: ExpoConnection,
+  expoId: string,
+  key: ExpoFeatureKey,
+): Promise<boolean> {
+  // URL 경로에 넣기 전에 화이트리스트로 검사한다(참가 등록 이벤트의 expoId는 형식 검증이 느슨하다).
+  if (!expoIdSchema.safeParse(expoId).success)
+    throw new InternalCallError('invalid expoId');
+  const response = await getInternal(
+    'expo',
+    connection.baseUrl,
+    `/internal/expo/${encodeURIComponent(expoId)}`,
+    connection.internalToken,
+    TIMEOUT_MS,
+  );
+  const body: unknown = await response.json().catch(() => undefined);
+  const parsed = expoFeatures.safeParse(body);
+  const enabled = parsed.success
+    ? parsed.data.features.find((feature) => feature.key === key)
+        ?.effectiveEnabled
+    : undefined;
+  if (typeof enabled !== 'boolean') {
+    throw new InternalCallError(`expo returned no ${key} feature`);
+  }
+  return enabled;
+}

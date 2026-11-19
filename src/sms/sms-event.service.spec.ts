@@ -1,4 +1,6 @@
+import { featurePolicyWith } from '../../test/fixtures/feature-policy.fixture';
 import { ExpoNameProvider } from '../common/expo-name.provider';
+import { InternalCallError } from '../common/internal-http';
 import { createAppConfig } from '../../test/fixtures/app-config.fixture';
 import {
   mockKakaoFetch,
@@ -45,6 +47,7 @@ describe('SmsEventService', () => {
   };
   let sender: { deliver: jest.Mock };
   let titleOf: jest.Mock<Promise<string>, [string | undefined]>;
+  let featureState: jest.Mock;
   let service: SmsEventService;
 
   beforeEach(() => {
@@ -62,17 +65,88 @@ describe('SmsEventService', () => {
     titleOf = jest
       .fn<Promise<string>, [string | undefined]>()
       .mockResolvedValue('광주 박람회');
+    featureState = jest.fn().mockResolvedValue(true);
     service = new SmsEventService(
       config,
       new SmsEventGuard(dedupe as unknown as SmsEventDedupeStore),
       sender as unknown as SmsSenderProvider,
       new KakaoSenderProvider(config),
       { titleOf } as unknown as ExpoNameProvider,
+      featurePolicyWith(featureState),
     );
     config.kakao = undefined;
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  describe('AUTO_NOTIFICATION 기능 설정', () => {
+    const result: SmsEvent = {
+      eventId: 'f1',
+      version: 1,
+      type: 'PROGRAM_CANCELLED',
+      phoneNumber: '01012345678',
+      expoId: 'expo-1',
+      senderType: 'STANDARD',
+      occurredAt: new Date().toISOString(),
+      cancelledBy: 'ADMIN',
+      items: [{ participantName: '홍길동', title: 'AI 코딩 체험' }],
+    };
+
+    it('ON이면 발송 직전 확인 후 보낸다', async () => {
+      await service.handle(result);
+
+      expect(featureState).toHaveBeenCalledWith('expo-1', 'AUTO_NOTIFICATION');
+      expect(sender.deliver).toHaveBeenCalledTimes(1);
+    });
+
+    it('OFF면 공급자를 부르지 않고 완료로 끝내 재전달·재활성화 때도 다시 보내지 않는다', async () => {
+      featureState.mockResolvedValue(false);
+
+      await expect(service.handle(result)).resolves.toBeUndefined();
+
+      expect(sender.deliver).not.toHaveBeenCalled();
+      expect(dedupe.markSending).not.toHaveBeenCalled();
+      expect(dedupe.complete).toHaveBeenCalledWith('f1');
+      expect(dedupe.release).not.toHaveBeenCalled();
+    });
+
+    it('정책 조회 장애면 보내지 않고 선점을 풀어 기존 유한 재시도에 맡긴다', async () => {
+      featureState.mockRejectedValue(
+        new InternalCallError('expo responded 503', 503),
+      );
+
+      await expect(service.handle(result)).rejects.toThrow(InternalCallError);
+
+      expect(sender.deliver).not.toHaveBeenCalled();
+      expect(dedupe.markSending).not.toHaveBeenCalled();
+      expect(dedupe.release).toHaveBeenCalledWith('f1');
+      expect(dedupe.complete).not.toHaveBeenCalled();
+    });
+
+    it('expoId 있는 당첨 문자도 OFF면 보내지 않는다', async () => {
+      featureState.mockResolvedValue(false);
+
+      await service.handle({ ...drawResult, expoId: 'expo-1' });
+
+      expect(sender.deliver).not.toHaveBeenCalled();
+    });
+
+    it('expoId 없는 구형 당첨 문자는 박람회를 추정하지 않고 확인 없이 보낸다', async () => {
+      await service.handle(drawResult);
+
+      expect(featureState).not.toHaveBeenCalled();
+      expect(sender.deliver).toHaveBeenCalledTimes(1);
+    });
+
+    it('CUSTOM(Expo 연수 outbox)은 자동 알림 설정 대상이 아니다', async () => {
+      featureState.mockResolvedValue(false);
+
+      await service.handle(custom);
+
+      expect(featureState).not.toHaveBeenCalled();
+      expect(sender.deliver).toHaveBeenCalledTimes(1);
+    });
+  });
 
   describe('신청 결과 문자(#110)', () => {
     const result: SmsEvent = {
